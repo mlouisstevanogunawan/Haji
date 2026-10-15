@@ -39,11 +39,21 @@
 
   html {
     scroll-behavior: smooth;
+    color-scheme: light;
   }
 
   body {
     @apply bg-[#ffffff] text-slate-800 antialiased selection:bg-emerald-100 selection:text-emerald-900;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  input, textarea, select {
+    background-color: #ffffff;
+    color: #1e293b;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #94a3b8;
   }
 }
 
