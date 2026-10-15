@@ -1,0 +1,14 @@
+{
+  "name": "ticket-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --dir my-next-app dev",
+    "build": "pnpm --dir my-next-app build",
+    "start": "pnpm --dir my-next-app start",
+    "lint": "pnpm --dir my-next-app lint"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "pg": "^8.23.1"
+  }
+}
