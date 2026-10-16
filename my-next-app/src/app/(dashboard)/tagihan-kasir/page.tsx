@@ -12,6 +12,7 @@ import { BillingStats } from "@/components/billing/BillingStats";
 import { BillingFilters } from "@/components/billing/BillingFilters";
 import { BillingTable } from "@/components/billing/BillingTable";
 import { PaymentModal, PaymentInvoiceData } from "@/components/payment/PaymentModal";
+import { IS_PRODUCTION } from "@/lib/midtrans/config";
 
 import {
   getInvoices,
@@ -229,6 +230,12 @@ export default function TagihanKasirPage() {
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200/60">
               Midtrans Sandbox &amp; Kasir
             </span>
+            {!IS_PRODUCTION && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-300 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                MODE TESTING
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400 mt-1">
             Kelola invoice DP &amp; cicilan, pencatatan kasir kantor, dan pembayaran online Midtrans Snap (QRIS, VA Bank).

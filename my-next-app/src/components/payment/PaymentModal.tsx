@@ -11,6 +11,7 @@ import { InvoiceDetail } from "./InvoiceDetail";
 import { PaymentMethods, SelectedChannelId } from "./PaymentMethods";
 import { PaymentStatus } from "./PaymentStatus";
 import { formatCurrency } from "@/lib/utils";
+import { getMidtransAmount, IS_PRODUCTION } from "@/lib/midtrans/config";
 
 export interface PaymentInvoiceData {
   id?: string;
@@ -77,6 +78,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   if (!isOpen || !invoice) return null;
 
+  // Amount actually charged & persisted (capped to a safe test value in sandbox).
+  const chargeAmount = getMidtransAmount(invoice.amount);
+
   const handlePayClick = async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -91,7 +95,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           order_id: uniqueOrderId,
-          gross_amount: invoice.amount,
+          gross_amount: chargeAmount,
           customer_details: {
             name: invoice.pilgrimName && invoice.pilgrimName !== "-" ? invoice.pilgrimName : "Ahmad Fauzi",
             email: invoice.email || "jamaah@almadinahtour.com",
@@ -101,7 +105,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           item_details: [
             {
               id: invoice.invoiceNumber,
-              price: invoice.amount,
+              price: chargeAmount,
               quantity: 1,
               name: (invoice.packageName && invoice.packageName !== "-" ? invoice.packageName : "Tagihan Paket Umroh").slice(0, 50),
             },
@@ -119,7 +123,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setIsLoading(false);
           setIsSuccess(true);
           if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
           }
         }, 1200);
         return;
@@ -135,7 +139,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setIsLoading(false);
             setIsSuccess(true);
             if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
             }
           },
           onPending: function (result: any) {
@@ -143,7 +147,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setIsLoading(false);
             setIsSuccess(true);
             if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
             }
           },
           onError: function (result: any) {
@@ -169,7 +173,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setIsLoading(false);
           setIsSuccess(true);
           if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
           }
         }, 1200);
       }
@@ -233,7 +237,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <div className="p-6 overflow-y-auto">
             <PaymentStatus
               invoiceNumber={invoice.invoiceNumber}
-              amount={invoice.amount}
+              amount={chargeAmount}
               paymentMethod={channelNameMap[selectedChannel]}
               orderId={lastOrderId}
               onClose={onClose}
@@ -261,7 +265,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               invoiceNumber={invoice.invoiceNumber}
               pilgrimName={invoice.pilgrimName || "-"}
               packageName={invoice.packageName || "-"}
-              amount={invoice.amount}
+              amount={chargeAmount}
             />
 
             {/* 2. Payment Channels Section (matching Image 2) */}
@@ -286,7 +290,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               ) : (
                 <>
                   <span>
-                    Bayar via {channelNameMap[selectedChannel]} — {formatCurrency(invoice.amount)}
+                    Bayar via {channelNameMap[selectedChannel]} — {formatCurrency(chargeAmount)}
                   </span>
                   <ArrowRight className="h-4 w-4" />
                 </>
@@ -297,6 +301,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
               <span>Transaksi resmi dilindungi Midtrans Payment Gateway &amp; OJK</span>
             </div>
+
+            {!IS_PRODUCTION && (
+              <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 rounded-lg py-1.5">
+                <span>Mode Testing Sandbox — nominal disamakan Rp 1.000.000</span>
+              </div>
+            )}
           </div>
         )}
       </div>

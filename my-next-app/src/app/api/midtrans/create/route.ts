@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSnapTransaction } from "@/lib/midtrans/server";
 import { MidtransSnapRequest } from "@/lib/midtrans/types";
+import { getMidtransAmount, buildSnapCallbacks } from "@/lib/midtrans/config";
 
 export async function POST(req: NextRequest) {
   try {
@@ -54,11 +55,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const sanitizedAmount = Math.round(Number(gross_amount));
+    // In sandbox mode, cap the charge to a safe test nominal so no payment
+    // channel rejects with "Exceeds max. transaction amount".
+    const sanitizedAmount = getMidtransAmount(gross_amount);
 
     let sanitizedItems = item_details?.map((it: any) => ({
       id: String(it.id || order_id).slice(0, 50),
-      price: Math.round(Number(it.price)),
+      price: getMidtransAmount(it.price),
       quantity: Math.max(1, Math.round(Number(it.quantity || 1))),
       name: String(it.name || "Tagihan Paket").slice(0, 50).trim(),
     }));
@@ -97,6 +100,7 @@ export async function POST(req: NextRequest) {
       },
       item_details: sanitizedItems,
       enabled_payments,
+      callbacks: buildSnapCallbacks(),
     };
 
     const snapResult = await createSnapTransaction(payload);

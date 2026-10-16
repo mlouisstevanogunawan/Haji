@@ -38,7 +38,11 @@ export interface MidtransSnapRequest {
   };
   callbacks?: {
     finish?: string;
+    success?: string;
+    pending?: string;
     error?: string;
+    deny?: string;
+    cancel?: string;
     close?: string;
   };
 }
