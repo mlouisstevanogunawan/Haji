@@ -27,7 +27,7 @@ export interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   invoice: PaymentInvoiceData | null;
-  onPaymentSuccess?: (invoiceNumber: string, paidAmount: number, channel: string) => void;
+  onPaymentSuccess?: (invoiceNumber: string, paidAmount: number, channel: string, orderId: string) => void;
   onViewReceipt?: (invoiceNumber: string) => void;
 }
 
@@ -123,7 +123,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setIsLoading(false);
           setIsSuccess(true);
           if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
+            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
           }
         }, 1200);
         return;
@@ -139,7 +139,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setIsLoading(false);
             setIsSuccess(true);
             if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
+              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
             }
           },
           onPending: function (result: any) {
@@ -147,7 +147,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setIsLoading(false);
             setIsSuccess(true);
             if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
+              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
             }
           },
           onError: function (result: any) {
@@ -165,7 +165,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         setIsLoading(false);
         setIsSuccess(true);
         if (onPaymentSuccess) {
-          onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+          onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
         }
       } else {
         // Fallback demo simulation
@@ -173,7 +173,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setIsLoading(false);
           setIsSuccess(true);
           if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel]);
+            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
           }
         }, 1200);
       }
@@ -184,7 +184,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         setIsLoading(false);
         setIsSuccess(true);
         if (onPaymentSuccess) {
-          onPaymentSuccess(invoice.invoiceNumber, invoice.amount, channelNameMap[selectedChannel]);
+          onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
         }
       }, 1000);
     }

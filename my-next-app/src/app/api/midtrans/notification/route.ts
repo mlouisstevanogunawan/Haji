@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyMidtransNotificationSignature, getMidtransConfig } from "@/lib/midtrans/server";
-import { MidtransNotificationPayload } from "@/lib/midtrans/types";
+import { getMidtransAmount } from "@/lib/midtrans/config";
+import { MidtransNotificationPayload, InvoiceStatus } from "@/lib/midtrans/types";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
@@ -62,49 +63,123 @@ export async function POST(req: NextRequest) {
       `[Midtrans Webhook] Order: ${order_id}, Status: ${transaction_status}, Result: ${invoiceStatus}`
     );
 
+    let finalInvoiceStatus: InvoiceStatus = invoiceStatus;
+
     // 3. Update Status di Supabase (invoices & payments table)
+    //    Pembayaran dicatat secara inkremental: nominal yang benar-benar dibayar
+    //    (sudah dinormalisasi via getMidtransAmount untuk sandbox) DIJUMLAHKAN ke
+    //    paid_amount yang sudah ada, lalu status dihitung ulang dari sisa tagihan.
     try {
       const supabase = createClient();
       const rawInvoiceNum = order_id.split("-TX")[0].split("-timestamp-")[0];
 
-      // Update invoices table
-      const { data: updatedInvoice } = await supabase
+      // Ambil invoice terkait sebelum update agar bisa mengakumulasi paid_amount
+      const { data: invoice } = await supabase
         .from("invoices")
-        .update({
-          status: invoiceStatus,
-          midtrans_transaction_id: transaction_id,
-          midtrans_order_id: order_id,
-          payment_method: payment_type,
-          payment_date: isPaid ? new Date().toISOString() : null,
-          paid_amount: isPaid ? Number(gross_amount) : 0,
-          updated_at: new Date().toISOString(),
-        })
+        .select("id, amount, paid_amount, status")
         .or(`invoice_number.eq.${rawInvoiceNum},midtrans_order_id.eq.${order_id}`)
-        .select("id")
         .maybeSingle();
 
-      // Insert record to payments audit log
-      await supabase.from("payments").insert({
-        invoice_id: updatedInvoice?.id || null,
-        order_id,
-        transaction_id,
-        payment_type: payment_type || "unknown",
-        gross_amount: Number(gross_amount) || 0,
-        transaction_status,
-        fraud_status: fraud_status || null,
-        settlement_time: isPaid ? new Date().toISOString() : null,
-        raw_response: payload,
-      });
+      let updatedInvoiceId: string | null = invoice?.id ?? null;
+
+      // Dedup lintas-jalur: lewati akumulasi bila order_id ini sudah pernah
+      // dicatat (mis. oleh client callback) ATAU transaction_id settlement/capture
+      // yang sama sudah pernah masuk (Midtrans dapat mengirim ulang notifikasi).
+      let existingPayment: { id: string } | null = null;
+      if (isPaid) {
+        const { data: byOrder } = await supabase
+          .from("payments")
+          .select("id")
+          .eq("order_id", order_id)
+          .in("transaction_status", ["settlement", "capture"])
+          .maybeSingle();
+        existingPayment = byOrder;
+
+        if (!existingPayment && transaction_id) {
+          const { data: byTxn } = await supabase
+            .from("payments")
+            .select("id")
+            .eq("transaction_id", transaction_id)
+            .in("transaction_status", ["settlement", "capture"])
+            .maybeSingle();
+          existingPayment = byTxn;
+        }
+      }
+      const alreadyApplied = Boolean(existingPayment);
+
+      if (invoice && alreadyApplied) {
+        finalInvoiceStatus = invoice.status;
+        updatedInvoiceId = invoice.id;
+      } else if (invoice) {
+        // Hanya tambah paid_amount untuk transaksi yang benar-benar lunas/di-settle.
+        if (isPaid) {
+          // nominal yang dikirim ke Midtrans (sudah dipotong saat sandbox)
+          const nominalDibayar = getMidtransAmount(Number(gross_amount) || 0);
+          const newPaid = Number(invoice.paid_amount || 0) + nominalDibayar;
+          const totalTagihan = Number(invoice.amount || 0);
+          const sisaTagihan = totalTagihan - newPaid;
+
+          finalInvoiceStatus = sisaTagihan <= 0 ? "paid" : "partial";
+
+          const { data: updated } = await supabase
+            .from("invoices")
+            .update({
+              paid_amount: newPaid,
+              status: finalInvoiceStatus,
+              midtrans_transaction_id: transaction_id,
+              midtrans_order_id: order_id,
+              payment_method: payment_type,
+              payment_date: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", invoice.id)
+            .select("id")
+            .maybeSingle();
+
+          updatedInvoiceId = updated?.id ?? updatedInvoiceId;
+        } else {
+          // pending / expire / cancel / deny: jangan sentuh paid_amount,
+          // hanya sinkronkan status & reference transaksi.
+          const { data: updated } = await supabase
+            .from("invoices")
+            .update({
+              status: invoiceStatus,
+              midtrans_transaction_id: transaction_id,
+              midtrans_order_id: order_id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", invoice.id)
+            .select("id")
+            .maybeSingle();
+
+          updatedInvoiceId = updated?.id ?? updatedInvoiceId;
+        }
+      }
+
+      // Insert record to payments audit log (lewati bila sudah pernah dicatat)
+      if (!alreadyApplied) {
+        await supabase.from("payments").insert({
+          invoice_id: updatedInvoiceId,
+          order_id,
+          transaction_id,
+          payment_type: payment_type || "unknown",
+          gross_amount: Number(gross_amount) || 0,
+          transaction_status,
+          fraud_status: fraud_status || null,
+          settlement_time: isPaid ? new Date().toISOString() : null,
+          raw_response: payload,
+        });
+      }
     } catch (dbError) {
       console.warn("[Midtrans Webhook] Database update notice:", dbError);
     }
 
     return NextResponse.json({
       status: "success",
-      message: `Transaction ${order_id} processed as ${invoiceStatus}`,
+      message: `Transaction ${order_id} processed as ${finalInvoiceStatus}`,
       order_id,
       transaction_status,
-      invoice_status: invoiceStatus,
+      invoice_status: finalInvoiceStatus,
     });
   } catch (error: any) {
     console.error("[Midtrans Webhook Error]:", error);

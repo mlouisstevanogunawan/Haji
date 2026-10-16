@@ -152,11 +152,16 @@ export default function TagihanKasirPage() {
   };
 
   // Handler: Payment Succeeded via Midtrans Snap
-  const handlePaymentSuccess = async (invoiceNumber: string, paidAmount: number, channel: string) => {
+  const handlePaymentSuccess = async (
+    invoiceNumber: string,
+    paidAmount: number,
+    channel: string,
+    orderId: string
+  ) => {
     try {
       const target = invoices.find((inv) => inv.invoiceNumber === invoiceNumber);
       if (target) {
-        await recordInvoicePayment(target.id, paidAmount, channel);
+        await recordInvoicePayment(target.id, paidAmount, channel, orderId);
         await loadInvoices();
       }
       showToast(`Pembayaran via ${channel} berhasil diproses! Status diperbarui.`);

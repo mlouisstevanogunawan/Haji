@@ -96,6 +96,38 @@ create policy "Admins and service role have full payments access"
     )
   );
 
+-- Jamaah boleh mencatat & membaca pembayaran untuk invoice miliknya sendiri.
+-- Diperlukan agar jalur client (recordInvoicePayment) dapat menulis jejak
+-- payments/order_id dan melakukan cek dedup lintas-jalur dengan webhook.
+create policy "Authenticated users can insert own invoice payments"
+  on public.payments
+  for insert
+  with check (
+    exists (
+      select 1 from public.invoices
+      where invoices.id = payments.invoice_id
+        and invoices.jamaah_id = auth.uid()
+    )
+  );
+
+create policy "Users can view payments for invoices they can access"
+  on public.payments
+  for select
+  using (
+    exists (
+      select 1 from public.invoices
+      where invoices.id = payments.invoice_id
+        and (
+          invoices.jamaah_id = auth.uid() or
+          auth.jwt() ->> 'role' in ('admin', 'service_role') or
+          exists (
+            select 1 from public.profiles
+            where profiles.id = auth.uid() and profiles.role in ('admin', 'admin_cabang', 'super_admin')
+          )
+        )
+    )
+  );
+
 -- 7. Trigger auto-update updated_at on invoices
 create or replace function public.update_invoices_updated_at()
 returns trigger as $$

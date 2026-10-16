@@ -66,10 +66,15 @@ export const JamaahDashboard: React.FC = () => {
     return () => { cancelled = true; };
   }, [loadInvoiceData]);
 
-  const handlePaymentSuccess = async (_invoiceNumber: string, paidAmount: number, channel: string) => {
+  const handlePaymentSuccess = async (
+    _invoiceNumber: string,
+    paidAmount: number,
+    channel: string,
+    orderId: string
+  ) => {
     if (activeInvoice) {
       try {
-        await recordInvoicePayment(activeInvoice.id, paidAmount, channel);
+        await recordInvoicePayment(activeInvoice.id, paidAmount, channel, orderId);
         await loadInvoiceData();
       } catch (err) {
         console.error("Gagal mencatat pembayaran:", err);

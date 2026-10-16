@@ -132,7 +132,8 @@ export async function getPayments(): Promise<PaymentRow[]> {
 export async function recordInvoicePayment(
   invoiceId: string,
   amount: number,
-  paymentMethod: string
+  paymentMethod: string,
+  orderId?: string
 ): Promise<InvoiceRow> {
   const supabase = createClient();
 
@@ -144,6 +145,20 @@ export async function recordInvoicePayment(
 
   if (fetchErr || !inv) {
     throw new Error(fetchErr?.message || "Invoice tidak ditemukan");
+  }
+
+  // Dedup lintas-jalur: bila order_id ini sudah pernah dicatat (mis. oleh webhook
+  // Midtrans), jangan akumulasi paid_amount lagi agar tidak double-count.
+  if (orderId) {
+    const { data: existing } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (existing) {
+      return inv;
+    }
   }
 
   const newPaid = Number(inv.paid_amount || 0) + Number(amount);
@@ -164,6 +179,19 @@ export async function recordInvoicePayment(
 
   if (error) {
     throw new Error(error.message);
+  }
+
+  // Cat jejak pembayaran dengan order_id yang sama supaya webhook dapat
+  // mendeteksi pembayaran ini dan tidak menghitung ulang.
+  if (orderId) {
+    await supabase.from("payments").insert({
+      invoice_id: invoiceId,
+      order_id: orderId,
+      payment_type: paymentMethod || "unknown",
+      gross_amount: Number(amount) || 0,
+      transaction_status: newStatus === "paid" ? "settlement" : "capture",
+      settlement_time: new Date().toISOString(),
+    });
   }
 
   return data;
