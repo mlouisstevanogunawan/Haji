@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logActivity, getClientIp } from "@/lib/utils/activity-logger";
+import { requireStaffSession, unauthorizedResponse } from "@/lib/api/session";
 
 function generateSecurePassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
@@ -12,6 +13,7 @@ function generateSecurePassword(): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireStaffSession(req))) return unauthorizedResponse();
   try {
     const body = await req.json();
     const { userId, email, manualPassword } = body;
@@ -45,7 +47,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Even if Supabase auth is mock/demo user, we consider it a successful reset simulation
+    // Tanpa resetSuccess, kata sandi di auth.users tidak berubah sama sekali —
+    // melaporkan keberhasilan hanya akan menipu pengguna.
+    if (!resetSuccess) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            errorMsg ||
+            "Gagal mereset kata sandi: pengguna auth tidak ditemukan atau service role ditolak.",
+        },
+        { status: 500 }
+      );
+    }
+
     await logActivity(
       userId || null,
       "reset_password",

@@ -1,1 +1,1 @@
-export { default } from "../airlines/page";
+export { default } from "../super-admin/maskapai/page";

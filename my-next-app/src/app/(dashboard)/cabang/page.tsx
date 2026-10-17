@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   Building2,
   Plus,
@@ -39,26 +40,27 @@ export interface BranchItem {
 }
 
 function mapRecordToBranchItem(b: BranchRecord): BranchItem {
-  const isHq = b.is_headquarter;
-  const avatar = isHq ? "HO-" : (b.code ? b.code.split("-")[0]?.slice(0, 3).toUpperCase() : "CAB");
+  const isHq = !!b.is_headquarter;
+  const code = b.code || "-";
   return {
     id: b.id,
     name: b.name,
-    code: b.code,
-    avatarText: avatar || "CAB",
+    code: code,
+    avatarText: code,
     isHeadquarter: isHq,
     city: b.city || "-",
     address: b.address || "-",
     phone: b.phone || "-",
     email: b.email || "-",
     type: isHq ? "Kantor Pusat" : "Cabang",
-    status: b.is_active ? "Aktif" : "Nonaktif",
+    status: b.is_active !== false ? "Aktif" : "Nonaktif",
   };
 }
 
 export default function CabangPage() {
   const [branches, setBranches] = React.useState<BranchItem[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [searchQuery, setSearchQuery] = React.useState<string>("");
   const [appliedSearch, setAppliedSearch] = React.useState<string>("");
 
@@ -84,12 +86,15 @@ export default function CabangPage() {
 
   const loadBranches = React.useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const records = await getBranches();
-      setBranches(records.map(mapRecordToBranchItem));
+      setBranches((records || []).map(mapRecordToBranchItem));
     } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("Gagal memuat cabang dari Supabase:", err);
       setBranches([]);
+      setLoadError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -113,7 +118,7 @@ export default function CabangPage() {
   const openAddModal = () => {
     setEditingId(null);
     setFormName("");
-    setFormCode("CAB-" + Math.floor(100 + Math.random() * 900));
+    setFormCode("");
     setFormCity("");
     setFormAddress("");
     setFormPhone("");
@@ -165,8 +170,9 @@ export default function CabangPage() {
       await loadBranches();
       setIsModalOpen(false);
     } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("Gagal menyimpan cabang:", err);
-      showToast("Gagal menyimpan data cabang ke Supabase.");
+      showToast(`Gagal menyimpan data cabang ke Supabase: ${msg}`);
     }
   };
 
@@ -183,8 +189,9 @@ export default function CabangPage() {
       await loadBranches();
       showToast(`Cabang "${deletingBranch.name}" berhasil dihapus dari Supabase.`);
     } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("Gagal menghapus cabang:", err);
-      showToast("Gagal menghapus cabang dari Supabase.");
+      showToast(`Gagal menghapus cabang dari Supabase: ${msg}`);
     } finally {
       setDeletingBranch(null);
     }
@@ -211,70 +218,86 @@ export default function CabangPage() {
 
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100/80 shadow-sm">
-            <Building2 className="h-6 w-6 stroke-[2.2]" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Kelola Cabang
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Manajemen data kantor cabang dan kantor pusat operasional Umroh & Haji
-            </p>
-          </div>
+        <div>
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+            <span>Beranda</span>
+            <span>&gt;</span>
+            <span className="text-gray-900 font-medium">Cabang</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900">Cabang</h1>
+          <p className="text-sm text-gray-500">Daftar cabang travel</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Tambah Cabang</span>
-        </button>
+        <div>
+          <Link
+            href="/super-admin/cabang/tambah"
+            className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 rounded-lg transition shadow-sm cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Tambah Cabang</span>
+          </Link>
+        </div>
       </div>
 
       {/* Search Bar */}
-      <div className="rounded-2xl border border-slate-100 bg-white p-2 sm:p-2.5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Cari nama cabang, kode, atau kota..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              className="w-full rounded-xl bg-slate-50/70 py-2.5 pl-10 pr-4 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition border border-transparent"
-            />
-          </div>
-          <button
-            onClick={handleSearch}
-            className="rounded-xl bg-emerald-50 px-4 py-2.5 text-xs sm:text-sm font-bold text-emerald-700 hover:bg-emerald-100 transition"
-          >
-            Cari
-          </button>
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Cari nama atau kode cab..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            className="w-64 sm:w-80 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-2xs"
+          />
         </div>
+        <button
+          onClick={handleSearch}
+          className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium text-sm px-4 py-2 rounded-lg transition shadow-2xs cursor-pointer"
+        >
+          Cari
+        </button>
       </div>
 
-      {/* Branches Table */}
-      <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+      {/* Branches Table matching Screenshot 5 */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="px-5 py-3.5">KODE & NAMA CABANG</th>
-                <th className="px-5 py-3.5">KOTA & ALAMAT</th>
-                <th className="px-5 py-3.5">KONTAK</th>
-                <th className="px-5 py-3.5">TIPE</th>
-                <th className="px-5 py-3.5">STATUS</th>
-                <th className="px-5 py-3.5 text-right sm:text-center">AKSI</th>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KODE
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  NAMA
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KOTA
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  TELEPON
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  STATUS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredBranches.length === 0 ? (
+            <tbody className="divide-y divide-gray-100">
+              {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
-                    Tidak ada cabang yang sesuai dengan pencarian.
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">
+                    Memuat data cabang dari Supabase...
+                  </td>
+                </tr>
+              ) : filteredBranches.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">
+                    {loadError
+                      ? `Gagal memuat data cabang dari Supabase: ${loadError}`
+                      : "Belum ada data cabang tersimpan di Supabase."}
                   </td>
                 </tr>
               ) : (
@@ -283,111 +306,55 @@ export default function CabangPage() {
                   return (
                     <tr
                       key={branch.id}
-                      className="transition-colors hover:bg-slate-50/70"
+                      className="hover:bg-gray-50 transition border-b border-gray-100"
                     >
-                      {/* Kode & Nama Cabang */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-bold text-xs ${
-                              isHq
-                                ? "bg-teal-50 text-teal-600 border border-teal-100"
-                                : branch.avatarText === "SBY"
-                                ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
-                                : "bg-emerald-50 text-emerald-600 border border-emerald-100"
-                            }`}
-                          >
-                            {branch.avatarText}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-sm text-slate-800">
-                                {branch.name}
-                              </span>
-                              {isHq && (
-                                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600 border border-amber-200/80 inline-flex items-center gap-0.5">
-                                  <Sparkles className="h-2.5 w-2.5" /> Pusat
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                              Kode: {branch.code}
-                            </p>
-                          </div>
-                        </div>
+                      {/* Kode */}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                        {branch.code}
                       </td>
 
-                      {/* Kota & Alamat */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                          <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                          <span>{branch.city}</span>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-1 line-clamp-1">
-                          {branch.address}
-                        </p>
+                      {/* Nama */}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                        <span>{branch.name}</span>
+                        {isHq && (
+                          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                            Pusat
+                          </span>
+                        )}
                       </td>
 
-                      {/* Kontak */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                          <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                          <span>{branch.phone}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
-                          <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                          <span>{branch.email}</span>
-                        </div>
+                      {/* Kota */}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                        {branch.city}
                       </td>
 
-                      {/* Tipe */}
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            isHq
-                              ? "bg-teal-50 text-teal-700 border border-teal-200/60"
-                              : "bg-slate-100 text-slate-600 border border-slate-200/60"
-                          }`}
-                        >
-                          {branch.type}
-                        </span>
+                      {/* Telepon */}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                        {branch.phone}
                       </td>
 
                       {/* Status */}
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            branch.status === "Aktif"
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                              : "bg-slate-100 text-slate-500 border border-slate-200"
-                          }`}
-                        >
-                          {branch.status === "Aktif" ? (
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                          ) : (
-                            <XCircle className="h-3.5 w-3.5" />
-                          )}
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                           {branch.status}
                         </span>
                       </td>
 
                       {/* Aksi */}
-                      <td className="px-5 py-4 text-right sm:text-center">
-                        <div className="flex items-center justify-end sm:justify-center gap-2">
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="inline-flex items-center justify-end gap-3">
                           <button
                             onClick={() => openEditModal(branch)}
-                            title="Edit Cabang"
-                            className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
                           >
-                            <Edit2 className="h-4 w-4" />
+                            Edit
                           </button>
                           {!isHq && (
                             <button
                               onClick={() => setDeletingBranch(branch)}
-                              title="Hapus Cabang"
-                              className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition"
+                              className="text-xs text-red-600 hover:text-red-800 font-medium transition cursor-pointer"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              Hapus
                             </button>
                           )}
                         </div>

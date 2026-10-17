@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type FlightRow = Database["public"]["Tables"]["flights"]["Row"];
@@ -37,46 +38,13 @@ export async function getFlightById(id: string): Promise<FlightRow | null> {
 }
 
 export async function createFlight(payload: FlightInsert): Promise<FlightRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("flights")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error inserting flight:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<FlightRow>("flights", { ...payload });
 }
 
 export async function updateFlight(id: string, payload: FlightUpdate): Promise<FlightRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("flights")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating flight:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<FlightRow>("flights", id, { ...payload });
 }
 
 export async function deleteFlight(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("flights").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting flight:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("flights", id);
 }

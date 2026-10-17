@@ -3,302 +3,291 @@
 import * as React from "react";
 import {
   Users,
-  UserCheck,
+  FileText,
   CreditCard,
   Clock,
-  TrendingUp,
-  ArrowUpRight,
 } from "lucide-react";
-import { TrendLineChart, DonutChart, OccupancyBars } from "../shared/Charts";
-import { fetchAdminDashboard, AdminDashboardData } from "@/features/dashboard/services/dashboardService";
+import {
+  AreaRegistrationChart,
+  DonutStatusChart,
+  PackageBarChart,
+} from "../shared/Charts";
+import {
+  fetchAdminDashboard,
+  AdminDashboardData,
+} from "@/features/dashboard/services/dashboardService";
+import { getAnnouncements, AnnouncementRow } from "@/services/announcementService";
 
 interface SuperAdminDashboardProps {
   isAdminCabang?: boolean;
 }
 
-function formatCompactRp(amount: number): string {
-  if (amount >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(2)} M`;
-  if (amount >= 1_000_000) return `Rp ${(amount / 1_000_000).toFixed(1)} Jt`;
+function formatRp(amount: number): string {
   return `Rp ${amount.toLocaleString("id-ID")}`;
 }
 
+const AUDIENCE_LABELS: Record<string, string> = {
+  all: "Semua Pengguna",
+  jamaah: "Jamaah",
+  agents: "Agen",
+  staff: "Staf",
+  muthawif: "Muthawif",
+};
+
+function formatDateId(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
-  isAdminCabang = false,
+  isAdminCabang = true,
 }) => {
   const [data, setData] = React.useState<AdminDashboardData | null>(null);
+  const [announcements, setAnnouncements] = React.useState<AnnouncementRow[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const result = await fetchAdminDashboard(isAdminCabang ? undefined : undefined);
-        if (!cancelled) setData(result);
-      } catch (err) {
+        const [result, ancs] = await Promise.all([
+          fetchAdminDashboard(undefined),
+          getAnnouncements().catch((err) => {
+            console.error("Gagal memuat pengumuman:", err);
+            return [] as AnnouncementRow[];
+          }),
+        ]);
+        if (cancelled) return;
+        setData(result);
+        setAnnouncements(
+          (ancs || []).filter((a) => a.is_published).slice(0, 3)
+        );
+        setErrorMessage(null);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const pesan = (err as Error).message;
         console.error("Failed to load admin dashboard:", err);
+        setErrorMessage(`Gagal memuat data dashboard: ${pesan}`);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isAdminCabang]);
 
-  if (loading) {
-    return (
-      <div className="space-y-6 pb-12">
-        <div className="rounded-2xl bg-[#033c2a] p-8 animate-pulse h-40" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-2xl border border-slate-100 bg-white p-5 h-32 animate-pulse" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-8 rounded-2xl border border-slate-100 bg-white p-6 h-72 animate-pulse" />
-          <div className="lg:col-span-4 rounded-2xl border border-slate-100 bg-white p-6 h-72 animate-pulse" />
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return (
-      <div className="flex items-center justify-center py-20 text-sm text-slate-400">
-        Gagal memuat data dashboard. Silakan refresh halaman.
-      </div>
-    );
-  }
-
-  const { kpis, trendData, paymentSegments, occupancyItems, departures } = data;
+  const kpis = data?.kpis;
+  const trendData = (data?.trendData || []).map((p) => ({
+    month: p.label,
+    value: p.value,
+  }));
+  const packageData = (data?.occupancyItems || []).map((o) => ({
+    name: o.label,
+    count: o.terisi,
+  }));
+  const paidCount = Number(data?.paymentSegments?.[0]?.count) || 0;
+  const partialCount = Number(data?.paymentSegments?.[1]?.count) || 0;
+  const unpaidCount = Number(data?.paymentSegments?.[2]?.count) || 0;
+  const departuresList = data?.departures || [];
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Emerald Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-[#033c2a] p-6 sm:p-8 text-white shadow-xl shadow-emerald-950/10">
-        <div
-          className="absolute inset-0 opacity-10 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, #ffffff 1px, transparent 1px)`,
-            backgroundSize: "20px 20px",
-          }}
-        />
-
-        <div className="relative z-10 max-w-3xl">
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-800/80 px-3.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-emerald-200 border border-emerald-700/50 mb-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            {isAdminCabang
-              ? "Ringkasan Operasional Cabang"
-              : "Ringkasan Operasional Multi-Cabang"}
-          </div>
-
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
-            Selamat Datang di Portal Manajemen Travel
-          </h1>
-
-          <p className="text-sm text-emerald-100/80 leading-relaxed max-w-2xl">
-            Pantau pertumbuhan jamaah, sisa kuota paket umroh & haji, status pembayaran,
-            dan manifest keberangkatan secara real-time.
-          </p>
-        </div>
+    <div className="space-y-6 pb-6">
+      {/* Page Header */}
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+          Dashboard Operasional
+        </h1>
+        <p className="text-xs text-gray-400 mt-0.5">
+          {isAdminCabang ? "Ringkasan cabang Anda" : "Ringkasan seluruh cabang"}
+        </p>
       </div>
 
-      {/* 4 Metric KPI Cards */}
+      {errorMessage && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {errorMessage}
+        </div>
+      )}
+
+      {/* 4 Stat Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Total Jamaah Terdaftar
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Users className="h-4.5 w-4.5" />
+        {/* Total Jamaah */}
+        <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-50 text-teal-600 flex-shrink-0">
+              <Users className="h-5 w-5" />
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.totalJamaah.toLocaleString("id-ID")}</span>
-            {kpis.jamaahGrowth !== 0 && (
-              <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                {kpis.jamaahGrowth > 0 ? "+" : ""}{kpis.jamaahGrowth}% bln ini
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">
-            {isAdminCabang ? "Jamaah aktif cabang ini" : "Jamaah aktif di seluruh cabang"}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Pendaftaran Aktif
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <UserCheck className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.pendaftaranAktif}</span>
-            {kpis.newRegistrations > 0 && (
-              <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                +{kpis.newRegistrations} pendaftar
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Musim berjalan</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Omzet Kas Masuk
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CreditCard className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              {formatCompactRp(kpis.omzetKasMasuk)}
-            </span>
-            {kpis.revenueGrowth !== 0 && (
-              <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                {kpis.revenueGrowth > 0 ? "+" : ""}{kpis.revenueGrowth}% MoM
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Total pembayaran terverifikasi</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Sisa Tagihan Outstanding
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Clock className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              {formatCompactRp(kpis.sisaTagihan)}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Cicilan jatuh tempo</p>
-        </div>
-      </div>
-
-      {/* Row 2: Charts */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-bold text-base text-slate-900">Tren Pendaftaran Jamaah</h3>
-              <p className="text-xs text-slate-400">Pertumbuhan pendaftaran bulanan tahun berjalan</p>
+              <p className="text-[11px] font-medium text-gray-400">Total Jamaah</p>
+              <p className="text-2xl font-bold tracking-tight text-gray-900 mt-0.5">
+                {loading ? "-" : kpis?.totalJamaah ?? 0}
+              </p>
             </div>
-            {kpis.jamaahGrowth > 0 && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
-                <TrendingUp className="h-3.5 w-3.5" />
-                +{kpis.jamaahGrowth}%
-              </span>
-            )}
-          </div>
-          <div className="pt-2">
-            <TrendLineChart
-              color="emerald"
-              dataPoints={trendData.map((d) => d.value)}
-              labels={trendData.map((d) => d.label)}
-            />
           </div>
         </div>
 
-        <div className="lg:col-span-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <h3 className="font-bold text-base text-slate-900">Status Pembayaran Tagihan</h3>
-            <p className="text-xs text-slate-400">Distribusi pelunasan jamaah aktif</p>
+        {/* Pendaftaran Aktif */}
+        <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600 flex-shrink-0">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-gray-400">Pendaftaran Aktif</p>
+              <p className="text-2xl font-bold tracking-tight text-gray-900 mt-0.5">
+                {loading ? "-" : kpis?.pendaftaranAktif ?? 0}
+              </p>
+            </div>
           </div>
-          <div className="py-2">
-            <DonutChart segments={paymentSegments} />
+        </div>
+
+        {/* Omzet Diterima */}
+        <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 flex-shrink-0">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-gray-400">Omzet Diterima</p>
+              <p className="text-2xl font-bold tracking-tight text-gray-900 mt-0.5">
+                {loading ? "-" : formatRp(kpis?.omzetKasMasuk ?? 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Outstanding */}
+        <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600 flex-shrink-0">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-gray-400">Outstanding</p>
+              <p className="text-2xl font-bold tracking-tight text-gray-900 mt-0.5">
+                {loading ? "-" : formatRp(kpis?.sisaTagihan ?? 0)}
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Row 3: Okupansi & Keberangkatan */}
+      {/* Row 2: Charts (12 cols) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-5 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        {/* Pendaftaran 12 Bulan Terakhir */}
+        <div className="lg:col-span-8 rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs flex flex-col justify-between">
           <div className="mb-4">
-            <h3 className="font-bold text-base text-slate-900">Okupansi Kuota Paket</h3>
-            <p className="text-xs text-slate-400">Perbandingan jamaah terdaftar vs kuota</p>
+            <h2 className="font-bold text-sm text-gray-800">
+              Pendaftaran 6 Bulan Terakhir
+            </h2>
           </div>
-          <OccupancyBars items={occupancyItems} />
+          <AreaRegistrationChart data={trendData} />
         </div>
 
-        <div className="lg:col-span-7 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-base text-slate-900">Jadwal Keberangkatan Terdekat</h3>
-              <p className="text-xs text-slate-400">Grup penerbangan umroh & haji siap berangkat</p>
-            </div>
-            <a href="#semua" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-              Lihat Semua
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
+        {/* Status Pembayaran */}
+        <div className="lg:col-span-4 rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs flex flex-col justify-between">
+          <div className="mb-4">
+            <h2 className="font-bold text-sm text-gray-800">
+              Status Pembayaran
+            </h2>
           </div>
+          <DonutStatusChart
+            lunas={paidCount}
+            sebagian={partialCount}
+            belumBayar={unpaidCount}
+          />
+        </div>
+      </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-400 font-semibold">
-                  <th className="pb-3 font-medium">Nama Paket</th>
-                  <th className="pb-3 font-medium">Keberangkatan</th>
-                  <th className="pb-3 font-medium">Maskapai</th>
-                  <th className="pb-3 font-medium text-center">Terisi</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {departures.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-slate-400">Belum ada jadwal keberangkatan</td>
-                  </tr>
-                ) : (
-                  departures.map((dep) => {
-                    const isUrgent = dep.daysUntil <= 14;
-                    const isMedium = dep.daysUntil <= 45 && dep.daysUntil > 14;
-                    const statusLabel = dep.status === "confirmed" ? "Terkonfirmasi" : "Menunggu";
-                    const statusColor = dep.status === "confirmed"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                      : "bg-amber-50 text-amber-700 border-amber-100";
+      {/* Row 3: Jamaah per Paket & Keberangkatan Terdekat */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        {/* Jamaah per Paket */}
+        <div className="lg:col-span-8 rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs flex flex-col justify-between">
+          <div className="mb-4">
+            <h2 className="font-bold text-sm text-gray-800">
+              Jamaah per Paket
+            </h2>
+          </div>
+          <PackageBarChart data={packageData} />
+        </div>
 
-                    return (
-                      <tr key={dep.id} className="group hover:bg-slate-50/60 transition">
-                        <td className="py-3 font-semibold text-slate-900">{dep.packageName}</td>
-                        <td className="py-3 whitespace-nowrap">
-                          <span className="flex items-center gap-1 text-slate-600">
-                            <Clock className={`h-3 w-3 ${isUrgent ? "text-amber-500" : "text-slate-400"}`} />
-                            {new Date(dep.departureDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
-                            <span className={`rounded px-1 py-0.5 text-[10px] font-bold ml-1 ${
-                              isUrgent ? "bg-amber-50 text-amber-700" : isMedium ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"
-                            }`}>
-                              H-{dep.daysUntil}
-                            </span>
-                          </span>
-                        </td>
-                        <td className="py-3 text-slate-600">{dep.airline}</td>
-                        <td className="py-3 text-center font-medium">
-                          <span className="font-bold text-slate-900">{dep.booked}</span> / {dep.quota}
-                        </td>
-                        <td className="py-3 text-right">
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${statusColor}`}>
-                            {statusLabel}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+        {/* Keberangkatan Terdekat */}
+        <div className="lg:col-span-4 rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs">
+          <div className="mb-4">
+            <h2 className="font-bold text-sm text-gray-800">
+              Keberangkatan Terdekat
+            </h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {departuresList.length === 0 ? (
+              <p className="py-4 text-xs text-gray-400">
+                Belum ada paket dengan tanggal keberangkatan.
+              </p>
+            ) : (
+              departuresList.map((dep) => (
+                <div key={dep.id} className="flex items-center justify-between py-3 gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-900">{dep.packageName}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {formatDateId(dep.departureDate)} • sisa kuota{" "}
+                      {Math.max(0, dep.quota - dep.booked)}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
+                      dep.status === "draft"
+                        ? "bg-gray-100 text-gray-600"
+                        : /haji/i.test(dep.packageName)
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-green-100 text-green-700"
+                    }`}
+                  >
+                    {/haji/i.test(dep.packageName) ? "Haji" : "Umroh"}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
+      </div>
+
+      {/* Row 4: Pengumuman Terbaru */}
+      <div className="rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs">
+        <h2 className="font-bold text-sm text-gray-800 mb-4">
+          Pengumuman Terbaru
+        </h2>
+        {announcements.length === 0 ? (
+          <p className="text-xs text-gray-400">Belum ada pengumuman terbit.</p>
+        ) : (
+          <div className="space-y-4 divide-y divide-gray-100">
+            {announcements.map((a) => (
+              <div key={a.id} className="pt-1 first:pt-0">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-[10px] font-semibold text-purple-700">
+                    {AUDIENCE_LABELS[a.target_audience ?? "all"] ||
+                      a.target_audience ||
+                      "Semua Pengguna"}
+                  </span>
+                  <span className="text-[11px] text-gray-400">
+                    {formatDateId(a.published_at || a.created_at)}
+                  </span>
+                </div>
+                <h3 className="font-bold text-xs sm:text-sm text-gray-900 mt-2">
+                  {a.title}
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">{a.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

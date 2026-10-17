@@ -11,14 +11,20 @@ export const FacilitiesList: React.FC<FacilitiesListProps> = ({ fasilitas }) => 
       <h5 className="text-sm font-bold text-slate-800 mb-2.5">
         Fasilitas Termasuk:
       </h5>
-      <ul className="space-y-2">
-        {fasilitas.map((item, index) => (
-          <li key={index} className="flex items-start gap-2 text-xs text-slate-600">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-            <span className="leading-tight">{item}</span>
-          </li>
-        ))}
-      </ul>
+      {fasilitas.length === 0 ? (
+        <p className="text-xs text-slate-400 italic leading-tight">
+          Daftar fasilitas belum dicantumkan. Hubungi staf kami untuk rincian lengkap.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {fasilitas.map((item, index) => (
+            <li key={index} className="flex items-start gap-2 text-xs text-slate-600">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <span className="leading-tight">{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };

@@ -1,28 +1,26 @@
 import { ReportTransaction } from "@/types/database.types";
-import { createClient } from "@/lib/supabase/client";
+import { dbRead, dbInsert } from "@/lib/db/write";
 
 export async function getTransactions(): Promise<ReportTransaction[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("invoices")
-    .select(`
+  // Lewat proxy service-role: policy SELECT invoices menuntut auth.uid()/admin.
+  // Pembacaan lintas jamaah hanya diizinkan untuk sesi staf (lihat /api/db).
+  const data = await dbRead<any>("invoices", {
+    select: `
       *,
-      profiles:jamaah_id (id, full_name, email)
-    `)
-    .order("created_at", { ascending: false });
+      profiles:jamaah_id (id, full_name, email, passport_number),
+      bookings:booking_id (packages:package_id (name, type))
+    `,
+    order: "created_at",
+    desc: true,
+  });
 
-  if (error) {
-    console.error("Error fetching transactions/invoices from Supabase:", error.message);
-    throw new Error(error.message);
-  }
-
-  return (data || []).map((inv: any) => ({
+  return data.map((inv: any) => ({
     id: inv.id,
     transactionNumber: inv.invoice_number,
     pilgrimName: inv.profiles?.full_name || "Jamaah",
-    passportNumber: "-",
-    packageName: "Paket Umroh Reguler",
-    packageCategory: "Reguler",
+    passportNumber: inv.profiles?.passport_number || "-",
+    packageName: inv.bookings?.packages?.name || "-",
+    packageCategory: inv.bookings?.packages?.type || "-",
     amount: Number(inv.amount) || 0,
     paymentType: inv.type === "dp" ? "DP" : inv.type === "pelunasan" ? "Pelunasan" : "Full Payment",
     paymentMethod: (inv.payment_method as any) || "BSI Virtual Account",
@@ -34,7 +32,6 @@ export async function getTransactions(): Promise<ReportTransaction[]> {
 export async function createTransaction(
   input: Omit<ReportTransaction, "id" | "transactionNumber">
 ): Promise<ReportTransaction> {
-  const supabase = createClient();
   const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
 
   const newInvoice = {
@@ -47,16 +44,10 @@ export async function createTransaction(
     payment_method: input.paymentMethod,
   };
 
-  const { data, error } = await supabase
-    .from("invoices")
-    .insert([newInvoice])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating transaction in Supabase:", error.message);
-    throw new Error(error.message);
-  }
+  const data = await dbInsert<{ id: string; invoice_number: string; amount: number; created_at?: string }>(
+    "invoices",
+    newInvoice
+  );
 
   return {
     id: data.id,

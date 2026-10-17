@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/client";
+import { dbRead, dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 
 export interface ManasikSessionRecord {
   id: string;
@@ -6,8 +6,8 @@ export interface ManasikSessionRecord {
   package_id?: string | null;
   package_name?: string | null;
   session_date: string;
-  session_time: string;
-  location: string;
+  session_time?: string | null;
+  location?: string | null;
   muthawif_id?: string | null;
   muthawif_name?: string | null;
   notes?: string | null;
@@ -28,113 +28,80 @@ export interface ManasikAttendanceRecord {
 }
 
 export async function getManasikSessions(): Promise<ManasikSessionRecord[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("manasik_sessions")
-    .select("*")
-    .order("session_date", { ascending: true });
+  return dbRead<ManasikSessionRecord>("manasik_sessions", {
+    select: "*",
+    order: "session_date",
+  });
+}
 
-  if (error) {
-    console.error("Error fetching manasik sessions:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data || [];
+export async function getManasikSessionById(id: string): Promise<ManasikSessionRecord | null> {
+  const rows = await dbRead<ManasikSessionRecord>("manasik_sessions", {
+    select: "*",
+    eq: { id },
+    limit: 1,
+  });
+  return rows[0] ?? null;
 }
 
 export async function getAttendanceBySession(sessionId: string): Promise<ManasikAttendanceRecord[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("manasik_attendance")
-    .select("*")
-    .eq("session_id", sessionId)
-    .order("pilgrim_name", { ascending: true });
-
-  if (error) {
-    console.error("Error fetching manasik attendance:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data || [];
+  return dbRead<ManasikAttendanceRecord>("manasik_attendance", {
+    select: "*",
+    eq: { session_id: sessionId },
+    order: "pilgrim_name",
+  });
 }
 
 export async function createManasikSession(payload: Partial<ManasikSessionRecord>): Promise<ManasikSessionRecord> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("manasik_sessions")
-    .insert([payload])
-    .select()
-    .single();
+  return dbInsert<ManasikSessionRecord>("manasik_sessions", { ...payload });
+}
 
-  if (error) {
-    console.error("Error creating manasik session:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+export async function updateManasikSession(
+  id: string,
+  payload: Partial<ManasikSessionRecord>
+): Promise<ManasikSessionRecord> {
+  return dbUpdate<ManasikSessionRecord>("manasik_sessions", id, { ...payload });
 }
 
 export async function updateAttendanceStatus(
   id: string,
   status: "Hadir" | "Izin" | "Sakit" | "Alpa"
 ): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("manasik_attendance")
-    .update({ status })
-    .eq("id", id);
-
-  if (error) {
-    console.error("Error updating attendance:", error.message);
-    throw new Error(error.message);
-  }
-
+  await dbUpdate<ManasikAttendanceRecord>("manasik_attendance", id, { status });
   return true;
 }
 
 export async function deleteManasikSession(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("manasik_sessions").delete().eq("id", id);
-  if (error) {
-    console.error("Error deleting manasik session:", error.message);
-    throw new Error(error.message);
-  }
-  return true;
+  return dbDelete("manasik_sessions", id);
 }
 
 export async function ensureSessionAttendance(sessionId: string): Promise<ManasikAttendanceRecord[]> {
-  const supabase = createClient();
   const existing = await getAttendanceBySession(sessionId);
   if (existing.length > 0) return existing;
 
-  // Otherwise populate from profiles
-  const { data: pilgrims } = await supabase
-    .from("profiles")
-    .select("id, full_name, raw_user_meta_data")
-    .in("role", ["jamaah", "jamaah_umroh"]);
+  // Populate dari kolom `profiles` yang nyata (nik, full_name). raw_user_meta_data
+  // bukan kolom profiles sehingga selalu undefined dan membuat NIK "-" terus.
+  const pilgrims = await dbRead<{ id: string; full_name: string | null; nik: string | null }>(
+    "profiles",
+    { select: "id, full_name, nik", in: { role: ["jamaah", "jamaah_umroh"] } }
+  );
 
-  if (!pilgrims || pilgrims.length === 0) return [];
+  if (pilgrims.length === 0) return [];
 
-  const inserts = pilgrims.map((p) => {
-    const meta = (p.raw_user_meta_data as any) || {};
-    return {
-      session_id: sessionId,
-      pilgrim_id: p.id,
-      pilgrim_name: p.full_name || "Jamaah",
-      nik: meta.nik || "-",
-      status: "Hadir" as const,
-    };
-  });
+  const inserts = pilgrims.map((p) => ({
+    session_id: sessionId,
+    pilgrim_id: p.id,
+    pilgrim_name: p.full_name || "Jamaah",
+    nik: p.nik || "-",
+    status: "Hadir" as const,
+  }));
 
-  const { data: created, error } = await supabase
-    .from("manasik_attendance")
-    .insert(inserts)
-    .select();
-
-  if (error) {
-    console.error("Error populating attendance:", error.message);
+  try {
+    // /api/db menulis satu baris per permintaan, jadi populate dilakukan per record.
+    return await Promise.all(
+      inserts.map((row) => dbInsert<ManasikAttendanceRecord>("manasik_attendance", row))
+    );
+  } catch (error) {
+    console.error("Error populating attendance:", (error as Error).message);
     return [];
   }
-
-  return created as ManasikAttendanceRecord[];
 }

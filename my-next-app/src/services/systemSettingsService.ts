@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbUpsert } from "@/lib/db/write";
 
 export interface SystemSettingsData {
   id?: string;
@@ -28,6 +29,14 @@ export interface SystemSettingsData {
   sessionTimeoutMinutes: string;
   enforceStrongPassword: boolean;
   enableAuditTrailLogging: boolean;
+
+  // White-label / branding
+  subtitle: string;
+  footerText: string;
+  primaryColor: string;
+  secondaryColor: string;
+  logoUrl: string;
+  faviconUrl: string;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsData = {
@@ -57,6 +66,13 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsData = {
   sessionTimeoutMinutes: "60",
   enforceStrongPassword: true,
   enableAuditTrailLogging: true,
+
+  subtitle: "",
+  footerText: "",
+  primaryColor: "",
+  secondaryColor: "",
+  logoUrl: "",
+  faviconUrl: "",
 };
 
 export async function getSystemSettings(): Promise<SystemSettingsData> {
@@ -95,6 +111,13 @@ export async function getSystemSettings(): Promise<SystemSettingsData> {
     sessionTimeoutMinutes: String(data.session_timeout_minutes || DEFAULT_SYSTEM_SETTINGS.sessionTimeoutMinutes),
     enforceStrongPassword: data.enforce_strong_password ?? DEFAULT_SYSTEM_SETTINGS.enforceStrongPassword,
     enableAuditTrailLogging: data.enable_audit_trail_logging ?? DEFAULT_SYSTEM_SETTINGS.enableAuditTrailLogging,
+
+    subtitle: data.subtitle ?? "",
+    footerText: data.footer_text ?? "",
+    primaryColor: data.primary_color ?? "",
+    secondaryColor: data.secondary_color ?? "",
+    logoUrl: data.logo_url ?? "",
+    faviconUrl: data.favicon_url ?? "",
   };
 }
 
@@ -125,16 +148,16 @@ export async function saveSystemSettings(settings: SystemSettingsData): Promise<
     session_timeout_minutes: parseInt(settings.sessionTimeoutMinutes) || 60,
     enforce_strong_password: settings.enforceStrongPassword,
     enable_audit_trail_logging: settings.enableAuditTrailLogging,
+
+    subtitle: settings.subtitle?.trim() ? settings.subtitle : null,
+    footer_text: settings.footerText?.trim() ? settings.footerText : null,
+    primary_color: settings.primaryColor?.trim() ? settings.primaryColor : null,
+    secondary_color: settings.secondaryColor?.trim() ? settings.secondaryColor : null,
+    logo_url: settings.logoUrl?.trim() ? settings.logoUrl : null,
+    favicon_url: settings.faviconUrl?.trim() ? settings.faviconUrl : null,
   };
 
-  const { error } = await supabase
-    .from("system_settings")
-    .upsert(dbPayload, { onConflict: "id" });
-
-  if (error) {
-    console.error("Error saving system settings to Supabase:", error.message);
-    throw new Error(error.message);
-  }
+  await dbUpsert("system_settings", dbPayload, { id: "default_settings" });
 
   return true;
 }

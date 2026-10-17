@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type GuideRow = Database["public"]["Tables"]["guides"]["Row"];
@@ -37,46 +38,13 @@ export async function getGuideById(id: string): Promise<GuideRow | null> {
 }
 
 export async function createGuide(payload: GuideInsert): Promise<GuideRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("guides")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating guide:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<GuideRow>("guides", { ...payload });
 }
 
 export async function updateGuide(id: string, payload: GuideUpdate): Promise<GuideRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("guides")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating guide:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<GuideRow>("guides", id, { ...payload });
 }
 
 export async function deleteGuide(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("guides").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting guide:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("guides", id);
 }

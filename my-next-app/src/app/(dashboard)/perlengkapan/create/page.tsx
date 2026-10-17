@@ -1,1 +1,1 @@
-export { default } from "../../equipment/create/page";
+export { default } from "../tambah/page";

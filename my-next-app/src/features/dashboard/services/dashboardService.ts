@@ -1,5 +1,42 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbRead } from "@/lib/db/write";
 import type { DashboardData } from "../types/dashboard.types";
+
+// Kebijakan baca di /api/db: sesi jamaah dipaksa terfilter ke barisnya sendiri,
+// sedangkan sesi staf boleh membaca lintas baris karena butuh rekap operasional.
+// currentUserId() kini menghasilkan UUID asli dari Supabase Auth, jadi dashboard
+// per orang (jamaah/agen/muthawif) bisa di-scope lewat parameter userId.
+async function currentUserId(): Promise<string | undefined> {
+  const supabase = createClient();
+  const { data } = await supabase.auth.getUser();
+  return data.user?.id ?? undefined;
+}
+
+/**
+ * Baris bookings/commissions/manasik_sessions menyimpan id master (agents.id /
+ * guides.id), bukan id login. Tanpa pemetaan ini filter per-user selalu kosong.
+ *
+ * Bila akun belum ditautkan ke baris master mana pun, dipakai UUID mustahil
+ * agar hasilnya kosong — bukan tanpa filter, yang akan membocorkan data semua
+ * agen/muthawif lain.
+ */
+const NO_MATCH = { eq: { id: "00000000-0000-0000-0000-000000000000" } };
+
+async function masterRowIds(
+  table: "agents" | "guides",
+  userId: string | undefined
+): Promise<string[]> {
+  if (!userId) return [];
+  const rows = await dbRead<any>(table, { select: "id", eq: { user_id: userId } });
+  return rows.map((r: any) => r.id).filter(Boolean);
+}
+
+function scopeByColumn(column: string, ids: string[], active: boolean) {
+  if (!active) return {};
+  if (ids.length === 1) return { eq: { [column]: ids[0] } };
+  if (ids.length > 1) return { in: { [column]: ids } };
+  return { eq: { [column]: NO_MATCH.eq.id } };
+}
 
 // ─── Shared Types ──────────────────────────────────────────────
 
@@ -123,6 +160,7 @@ export interface JamaahBookingInfo {
   packageName: string;
   durationDays: number;
   registrationCode: string;
+  departureDate: string;
   daysUntilDeparture: number;
   airline: string;
   flightNumber: string;
@@ -171,22 +209,25 @@ function daysUntil(dateStr: string): number {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
+function formatDateId(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "-";
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 // ─── Super Admin / Admin Cabang ────────────────────────────────
 
 export async function fetchAdminDashboard(branchId?: string): Promise<AdminDashboardData> {
-  const supabase = createClient();
-
-  const [profilesRes, bookingsRes, invoicesRes, packagesRes] = await Promise.all([
-    supabase.from("profiles").select("id, created_at").in("role", ["jamaah", "jamaah_umroh"]),
-    supabase.from("bookings").select("id, package_id, created_at, status"),
-    supabase.from("invoices").select("id, amount, paid_amount, status, created_at"),
-    supabase.from("packages").select("id, name, quota, departure_date, airline, type, status"),
+  const [profiles, bookings, invoices, packages] = await Promise.all([
+    dbRead<any>("profiles", {
+      select: "id, created_at",
+      in: { role: ["jamaah", "jamaah_umroh"] },
+    }),
+    dbRead<any>("bookings", { select: "id, package_id, created_at, status, departure_date" }),
+    dbRead<any>("invoices", { select: "id, amount, paid_amount, status, created_at" }),
+    dbRead<any>("packages", { select: "id, name, quota, departure_date, airline, type, is_active" }),
   ]);
-
-  const profiles = profilesRes.data || [];
-  const bookings = bookingsRes.data || [];
-  const invoices = invoicesRes.data || [];
-  const packages = packagesRes.data || [];
 
   const totalJamaah = profiles.length;
   const now = new Date();
@@ -256,24 +297,35 @@ export async function fetchAdminDashboard(branchId?: string): Promise<AdminDashb
     return { label: pkg.name, terisi: booked, total: quota };
   });
 
-  // Departures
+  // Departures — jadwal paket lebih prioritas; bila paket belum punya
+  // departure_date, pakai keberangkatan tercepat dari bookingannya.
+  const departureDateOf = (pkg: any): string | null => {
+    if (pkg.departure_date) return pkg.departure_date;
+    const dates = bookings
+      .filter((b: any) => b.package_id === pkg.id && b.departure_date)
+      .map((b: any) => b.departure_date as string)
+      .sort();
+    return dates[0] || null;
+  };
+
   const departures: DepartureRow[] = packages
-    .filter((pkg: any) => pkg.departure_date)
-    .sort((a: any, b: any) => new Date(a.departure_date).getTime() - new Date(b.departure_date).getTime())
+    .map((pkg: any) => ({ pkg, dep: departureDateOf(pkg) }))
+    .filter((row: any) => row.dep)
+    .sort((a: any, b: any) => new Date(a.dep).getTime() - new Date(b.dep).getTime())
     .slice(0, 5)
-    .map((pkg: any) => {
+    .map(({ pkg, dep }: any) => {
       const quota = Number(pkg.quota) || 0;
       const booked = bookings.filter((b) => b.package_id === pkg.id).length;
-      const dUntil = daysUntil(pkg.departure_date);
+      const dUntil = daysUntil(dep);
       return {
         id: pkg.id,
         packageName: pkg.name,
-        departureDate: pkg.departure_date?.split("T")[0] || "",
+        departureDate: dep?.split("T")[0] || "",
         daysUntil: dUntil,
         airline: pkg.airline || "-",
         booked,
         quota,
-        status: pkg.status || "confirmed",
+        status: pkg.is_active === false ? "draft" : "confirmed",
       };
     });
 
@@ -297,28 +349,36 @@ export async function fetchAdminDashboard(branchId?: string): Promise<AdminDashb
 // ─── Mitra Agen ────────────────────────────────────────────────
 
 export async function fetchAgentDashboard(): Promise<AgentDashboardData> {
-  const supabase = createClient();
+  const userId = await currentUserId();
+  const agentIds = await masterRowIds("agents", userId);
+  const agentScope = scopeByColumn("agent_id", agentIds, Boolean(userId));
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const userId = user?.id;
+  const agentProfiles = await dbRead<any>("profiles", {
+    select: "full_name, agent_code",
+    ...(userId ? { eq: { id: userId } } : {}),
+    limit: 1,
+  });
 
-  const { data: agentProfile } = await supabase
-    .from("profiles")
-    .select("full_name, agent_code")
-    .eq("id", userId)
-    .single();
-
+  const agentProfile = agentProfiles[0];
   const agentName = agentProfile?.full_name || "Mitra Agen";
-  const referralCode = agentProfile?.agent_code || `AGN-${userId?.slice(0, 6)?.toUpperCase() || "001"}`;
+  const referralCode =
+    agentProfile?.agent_code || `AGN-${userId?.slice(0, 6)?.toUpperCase() || "001"}`;
 
-  const [commissionsRes, bookingsRes, invoicesRes] = await Promise.all([
-    supabase.from("commissions").select("*, bookings:booking_id (*, profiles:pilgrim_id (full_name), packages:package_id (name))").eq("agent_id", userId),
-    supabase.from("bookings").select("*, profiles:pilgrim_id (full_name, created_at), packages:package_id (name)").eq("agent_id", userId),
-    supabase.from("invoices").select("*"),
+  const [commissions, agentBookings] = await Promise.all([
+    dbRead<any>("commissions", {
+      select: "*, bookings:booking_id (*, profiles:pilgrim_id (full_name), packages:package_id (name))",
+      ...agentScope,
+    }),
+    dbRead<any>("bookings", {
+      select: "*, profiles:pilgrim_id (full_name, created_at), packages:package_id (name)",
+      ...agentScope,
+    }),
   ]);
 
-  const commissions = commissionsRes.data || [];
-  const agentBookings = bookingsRes.data || [];
+  const agentBookingIds = agentBookings.map((b: any) => b.id).filter(Boolean);
+  const invoices = agentBookingIds.length
+    ? await dbRead<any>("invoices", { select: "*", in: { booking_id: agentBookingIds } })
+    : [];
 
   const totalKomisi = commissions.reduce((acc, c: any) => acc + (Number(c.amount) || 0), 0);
   const now = new Date();
@@ -365,11 +425,10 @@ export async function fetchAgentDashboard(): Promise<AgentDashboardData> {
   }
 
   // Payment segments from agent's bookings' invoices
-  const agentInvoiceIds = new Set(agentBookings.map((b: any) => b.id));
-  const relevantInvoices = (invoicesRes.data || []).filter((inv: any) => agentInvoiceIds.has(inv.booking_id));
-  const paidCount = relevantInvoices.filter((inv: any) => inv.status === "paid").length;
-  const partialCount = relevantInvoices.filter((inv: any) => inv.status === "partial").length;
-  const unpaidCount = relevantInvoices.filter((inv: any) => inv.status === "unpaid" || !inv.status).length;
+  // Payment segments: invoices sudah dibatasi ke booking milik agen ini.
+  const paidCount = invoices.filter((inv: any) => inv.status === "paid").length;
+  const partialCount = invoices.filter((inv: any) => inv.status === "partial").length;
+  const unpaidCount = invoices.filter((inv: any) => inv.status === "unpaid" || !inv.status).length;
   const totalRel = Math.max(paidCount + partialCount + unpaidCount, 1);
   const paymentSegments: PaymentSegment[] = [
     { label: "Lunas", percent: Math.round((paidCount / totalRel) * 100), count: `${paidCount} Jamaah`, color: "#059669" },
@@ -408,30 +467,37 @@ export async function fetchAgentDashboard(): Promise<AgentDashboardData> {
 // ─── Muthawif ──────────────────────────────────────────────────
 
 export async function fetchMuthawifDashboard(): Promise<MuthawifDashboardData> {
-  const supabase = createClient();
+  const userId = await currentUserId();
+  const guideIds = await masterRowIds("guides", userId);
+  const sessionScope = scopeByColumn("muthawif_id", guideIds, Boolean(userId));
+  const bookingScope = scopeByColumn("guide_id", guideIds, Boolean(userId));
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const userId = user?.id;
+  const profiles = await dbRead<any>("profiles", {
+    select: "full_name",
+    ...(userId ? { eq: { id: userId } } : {}),
+    limit: 1,
+  });
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", userId)
-    .single();
+  const muthawifName = profiles[0]?.full_name || "Muthawif";
 
-  const muthawifName = profile?.full_name || "Muthawif";
-
-  const [sessionsRes, attendanceRes, bookingsRes, packagesRes] = await Promise.all([
-    supabase.from("manasik_sessions").select("*").eq("muthawif_id", userId).order("session_date", { ascending: true }),
-    supabase.from("manasik_attendance").select("*"),
-    supabase.from("bookings").select("*, profiles:pilgrim_id (full_name, phone, city)").eq("guide_id", userId),
-    supabase.from("packages").select("departure_date, airline").order("departure_date", { ascending: true }).limit(1),
+  const [sessions, guideBookings, nextPkgRows] = await Promise.all([
+    dbRead<any>("manasik_sessions", {
+      ...sessionScope,
+      order: "session_date",
+    }),
+    dbRead<any>("bookings", {
+      select: "*, profiles:pilgrim_id (full_name, phone, address)",
+      ...bookingScope,
+    }),
+    dbRead<any>("packages", { select: "departure_date, airline", order: "departure_date", limit: 1 }),
   ]);
 
-  const sessions = sessionsRes.data || [];
-  const allAttendance = attendanceRes.data || [];
-  const guideBookings = bookingsRes.data || [];
-  const nextPkg = packagesRes.data?.[0];
+  // Kehadiran hanya diambil untuk sesi milik muthawif ini.
+  const sessionIds = sessions.map((s: any) => s.id).filter(Boolean);
+  const allAttendance = sessionIds.length
+    ? await dbRead<any>("manasik_attendance", { select: "*", in: { session_id: sessionIds } })
+    : [];
+  const nextPkg = nextPkgRows[0];
 
   const totalJamaah = guideBookings.length || allAttendance.filter((a: any) => a.pilgrim_id).length || 0;
   const completedSessions = sessions.filter((s: any) => new Date(s.session_date) < new Date()).length;
@@ -477,7 +543,7 @@ export async function fetchMuthawifDashboard(): Promise<MuthawifDashboardData> {
     return {
       id: b.id,
       name: b.profiles?.full_name || "Jamaah",
-      city: b.profiles?.city || "-",
+      city: b.profiles?.address || "-",
       phone: b.profiles?.phone || "-",
       roomType: b.room_type || "-",
       manasikProgress: progress,
@@ -496,23 +562,25 @@ export async function fetchMuthawifDashboard(): Promise<MuthawifDashboardData> {
 // ─── Jamaah ────────────────────────────────────────────────────
 
 export async function fetchJamaahDashboard(): Promise<JamaahDashboardData> {
-  const supabase = createClient();
+  const userId = await currentUserId();
+  const scope = userId ? { eq: { pilgrim_id: userId } } : {};
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const userId = user?.id;
-
-  const [profileRes, bookingRes] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", userId).single(),
-    supabase
-      .from("bookings")
-      .select("*, packages:package_id (*)")
-      .eq("pilgrim_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1),
+  const [profileRows, bookingRows] = await Promise.all([
+    dbRead<any>(
+      "profiles",
+      { select: "*", ...(userId ? { eq: { id: userId } } : {}), limit: 1 }
+    ),
+    dbRead<any>("bookings", {
+      select: "*, packages:package_id (*)",
+      ...scope,
+      order: "created_at",
+      desc: true,
+      limit: 1,
+    }),
   ]);
 
-  const profile = profileRes.data;
-  const booking = bookingRes.data?.[0] as any;
+  const profile = profileRows[0];
+  const booking = bookingRows[0] as any;
   const pkg = booking?.packages;
 
   let bookingInfo: JamaahBookingInfo | null = null;
@@ -520,9 +588,10 @@ export async function fetchJamaahDashboard(): Promise<JamaahDashboardData> {
     const depDate = pkg.departure_date || "";
     bookingInfo = {
       pilgrimName: profile?.full_name || profile?.email || "Jamaah",
-      packageName: pkg.name || "Paket Umroh",
-      durationDays: pkg.duration_days || 9,
-      registrationCode: booking.booking_number || `REG-${new Date().getFullYear()}-001`,
+      packageName: pkg.name || "-",
+      durationDays: Number(pkg.duration_days) || 0,
+      registrationCode: booking.booking_number || booking.invoice_number || "-",
+      departureDate: formatDateId(depDate),
       daysUntilDeparture: depDate ? daysUntil(depDate) : 0,
       airline: pkg.airline || "-",
       flightNumber: pkg.flight_number || "-",
@@ -532,21 +601,19 @@ export async function fetchJamaahDashboard(): Promise<JamaahDashboardData> {
   }
 
   // Documents
-  const { data: docs } = await supabase
-    .from("documents")
-    .select("*")
-    .eq("pilgrim_id", userId);
+  const docs = await dbRead<any>("documents", { select: "*", ...scope });
 
   const docMap: Record<string, any> = {};
   (docs || []).forEach((d: any) => {
     docMap[d.document_type] = d;
   });
 
+  // Kunci harus memakai nilai enum public.document_type yang sebenarnya
+  // ('passport','visa','vaccine_certificate','other'); KTP/KK tidak ada di enum.
   const requiredDocs = [
-    { key: "ktp", name: "Kartu Tanda Penduduk (KTP)", subLabel: "Dokumen Wajib" },
-    { key: "kk", name: "Kartu Keluarga (KK)", subLabel: "Dokumen Wajib" },
     { key: "passport", name: "Buku Paspor Asli", subLabel: "Dokumen Wajib" },
-    { key: "vaccine", name: "Buku Kuning / Sertifikat Vaksin Meningitis", subLabel: "Dokumen Wajib" },
+    { key: "visa", name: "Visa Umroh", subLabel: "Dokumen Wajib" },
+    { key: "vaccine_certificate", name: "Buku Kuning / Sertifikat Vaksin Meningitis", subLabel: "Dokumen Wajib" },
   ];
 
   const documents: JamaahDocumentItem[] = requiredDocs.map((rd) => {
@@ -557,15 +624,13 @@ export async function fetchJamaahDashboard(): Promise<JamaahDashboardData> {
     return { name: rd.name, subLabel: rd.subLabel, status };
   });
 
-  // Manasik
-  const { data: sessions } = await supabase
-    .from("manasik_sessions")
-    .select("*")
-    .gte("session_date", new Date().toISOString().split("T")[0])
-    .order("session_date", { ascending: true })
-    .limit(1);
-
-  const nextManasik = sessions?.[0];
+  // Manasik: proxy baca tidak mendukung operator >=, jadi disaring di sini.
+  const sessions = await dbRead<any>("manasik_sessions", {
+    select: "*",
+    order: "session_date",
+  });
+  const today = new Date().toISOString().split("T")[0];
+  const nextManasik = sessions.find((s: any) => (s.session_date || "") >= today);
   const manasik: JamaahManasikInfo | null = nextManasik
     ? {
         title: nextManasik.title || "Bimbingan Manasik",
@@ -575,24 +640,12 @@ export async function fetchJamaahDashboard(): Promise<JamaahDashboardData> {
     : null;
 
   // Equipment
-  const { data: equip } = await supabase
-    .from("equipment_assignments")
-    .select("*")
-    .eq("pilgrim_id", userId);
+  const equip = await dbRead<any>("equipment_assignments", { select: "*", ...scope });
 
-  const defaultEquipment: JamaahEquipmentItem[] = [
-    { name: "Koper Bagasi 24 Inch", status: "received" },
-    { name: "Kain Ihram / Mukena", status: "received" },
-    { name: "Buku Doa & Panduan", status: "received" },
-    { name: "ID Card & Tali Gelang", status: "airport" },
-  ];
-
-  const equipment: JamaahEquipmentItem[] = (equip && equip.length > 0)
-    ? equip.map((e: any) => ({
-        name: e.equipment_name || e.item_name || "Perlengkapan",
-        status: e.status === "distributed" ? "received" as const : e.status === "airport" ? "airport" as const : "pending" as const,
-      }))
-    : defaultEquipment;
+  const equipment: JamaahEquipmentItem[] = (equip || []).map((e: any) => ({
+    name: e.item_name || "Perlengkapan",
+    status: e.is_delivered ? "received" as const : "pending" as const,
+  }));
 
   return { booking: bookingInfo, documents, manasik, equipment };
 }

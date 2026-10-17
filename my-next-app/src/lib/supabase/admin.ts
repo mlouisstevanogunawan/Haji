@@ -8,22 +8,25 @@ import { createClient } from "@supabase/supabase-js";
 export function createAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
   if (!supabaseUrl) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable.");
   }
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY) {
-    console.warn(
-      "[Supabase Admin Warning] SUPABASE_SERVICE_ROLE_KEY is not defined in environment variables. " +
-        "Falling back to anon key. Admin auth actions (e.g. auth.admin.createUser) require service_role key."
+  // Sengaja TIDAK fallback ke anon key. Anon key tunduk pada RLS, jadi tulis
+  // akan berakhir 0 baris tanpa error yang kelihatan — persis bug yang membuat
+  // form seolah-olah gagal menyimpan. Lebih baik gagal keras di sini.
+  if (!serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY belum di-set. Ambil nilai 'service_role' di " +
+        "Supabase Dashboard → Project Settings → API → Project API keys, lalu " +
+        "tambahkan sebagai SUPABASE_SERVICE_ROLE_KEY di .env.local dan pada " +
+        "Environment Variables deployment (Vercel)."
     );
   }
 
-  return createClient(supabaseUrl, serviceRoleKey!, {
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,

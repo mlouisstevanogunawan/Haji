@@ -19,89 +19,65 @@ import {
   Sliders,
 } from "lucide-react";
 
-interface SystemSettings {
-  // Profil & Legalitas
-  travelName: string;
-  companyLegalName: string;
-  ppiuNumber: string;
-  pihkNumber: string;
-  accreditation: string;
-  establishedYear: string;
-  supportPhone: string;
-  supportEmail: string;
-  websiteUrl: string;
-  headOfficeAddress: string;
-
-  // Kebijakan Keuangan
-  defaultDpAmount: string;
-  paymentDueDaysBeforeDeparture: string;
-  enableMidtransGateway: boolean;
-  adminFeeAmount: string;
-
-  // Notifikasi Gateway
-  waGatewayApiKey: string;
-  waGatewaySenderNumber: string;
-  enableWaNewRegistration: boolean;
-  enableWaPaymentReminder: boolean;
-  enableWaManasikReminder: boolean;
-  enableEmailReceipt: boolean;
-
-  // Keamanan & Akses
-  sessionTimeoutMinutes: string;
-  enforceStrongPassword: boolean;
-  enableAuditTrailLogging: boolean;
-}
-
-const defaultSettings: SystemSettings = {
-  travelName: "Al-Madinah Travel",
-  companyLegalName: "PT Al-Madinah Wisata Syariah",
-  ppiuNumber: "Kemenag RI No. U.412 Tahun 2021",
-  pihkNumber: "Kemenag RI No. HK.108 Tahun 2023",
-  accreditation: "Akreditasi A (Sangat Baik)",
-  establishedYear: "2016",
-  supportPhone: "021-3901234",
-  supportEmail: "pusat@almedinahtravel.com",
-  websiteUrl: "https://almedinahtravel.com",
-  headOfficeAddress: "Jl. M.H. Thamrin No. 12, Menteng, Jakarta Pusat 10340",
-
-  defaultDpAmount: "5000000",
-  paymentDueDaysBeforeDeparture: "30",
-  enableMidtransGateway: true,
-  adminFeeAmount: "0",
-
-  waGatewayApiKey: "wagateway_live_key_99882233",
-  waGatewaySenderNumber: "081299998888",
-  enableWaNewRegistration: true,
-  enableWaPaymentReminder: true,
-  enableWaManasikReminder: true,
-  enableEmailReceipt: true,
-
-  sessionTimeoutMinutes: "60",
-  enforceStrongPassword: true,
-  enableAuditTrailLogging: true,
-};
-
 import {
   getSystemSettings,
   saveSystemSettings,
   SystemSettingsData,
-  DEFAULT_SYSTEM_SETTINGS,
 } from "@/services/systemSettingsService";
+
+// Nilai awal NETRAL/kosong. Bukan nilai "default" fiktif: sebelum data nyata
+// terbaca dari tabel system_settings, setiap kolom ditampilkan kosong.
+const EMPTY_SETTINGS: SystemSettingsData = {
+  travelName: "",
+  companyLegalName: "",
+  ppiuNumber: "",
+  pihkNumber: "",
+  accreditation: "",
+  establishedYear: "",
+  supportPhone: "",
+  supportEmail: "",
+  websiteUrl: "",
+  headOfficeAddress: "",
+  defaultDpAmount: "",
+  paymentDueDaysBeforeDeparture: "",
+  enableMidtransGateway: false,
+  adminFeeAmount: "",
+  waGatewayApiKey: "",
+  waGatewaySenderNumber: "",
+  enableWaNewRegistration: false,
+  enableWaPaymentReminder: false,
+  enableWaManasikReminder: false,
+  enableEmailReceipt: false,
+  sessionTimeoutMinutes: "",
+  enforceStrongPassword: false,
+  enableAuditTrailLogging: false,
+  subtitle: "",
+  footerText: "",
+  primaryColor: "",
+  secondaryColor: "",
+  logoUrl: "",
+  faviconUrl: "",
+};
 
 export default function PengaturanSistemPage() {
   const [activeTab, setActiveTab] = React.useState<"profile" | "payment" | "notification" | "security">("profile");
-  const [settings, setSettings] = React.useState<SystemSettingsData>(DEFAULT_SYSTEM_SETTINGS);
+  const [settings, setSettings] = React.useState<SystemSettingsData>(EMPTY_SETTINGS);
   const [isSaving, setIsSaving] = React.useState<boolean>(false);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [toastMessage, setToastMessage] = React.useState<string | null>(null);
+  const [toastKind, setToastKind] = React.useState<"success" | "error">("success");
 
   const loadSettings = React.useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const data = await getSystemSettings();
       setSettings(data);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Gagal memuat pengaturan sistem:", err);
+      setSettings(EMPTY_SETTINGS);
+      setLoadError(`Gagal memuat pengaturan dari database: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
@@ -111,7 +87,8 @@ export default function PengaturanSistemPage() {
     loadSettings();
   }, [loadSettings]);
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, kind: "success" | "error" = "success") => {
+    setToastKind(kind);
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
@@ -121,37 +98,56 @@ export default function PengaturanSistemPage() {
     setIsSaving(true);
     try {
       await saveSystemSettings(settings);
-      showToast("Pengaturan sistem berhasil disimpan ke database Supabase!");
-    } catch (err) {
+      await loadSettings();
+      showToast("Pengaturan sistem berhasil disimpan ke database Supabase!", "success");
+    } catch (err: unknown) {
       console.error("Gagal menyimpan pengaturan ke Supabase:", err);
-      showToast("Gagal menyimpan pengaturan ke database.");
+      showToast(`Gagal menyimpan pengaturan ke database: ${(err as Error).message}`, "error");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleReset = async () => {
-    if (confirm("Kembalikan seluruh pengaturan ke standar default?")) {
-      setIsSaving(true);
-      try {
-        await saveSystemSettings(DEFAULT_SYSTEM_SETTINGS);
-        setSettings(DEFAULT_SYSTEM_SETTINGS);
-        showToast("Pengaturan sistem dikembalikan ke default di database.");
-      } catch (err) {
-        console.error("Gagal mereset pengaturan:", err);
-      } finally {
-        setIsSaving(false);
-      }
-    }
+  // Buang edit yang belum disimpan dan muat ulang nilai apa adanya dari DB,
+  // bukan menimpa dengan "default" fiktif.
+  const handleReload = async () => {
+    setIsSaving(true);
+    await loadSettings();
+    setIsSaving(false);
+    showToast("Halaman dimuat ulang dari database.", "success");
   };
 
   return (
     <div className="space-y-6 pb-16">
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 rounded-xl bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl animate-in fade-in slide-in-from-bottom-3 duration-200">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        <div
+          className={`fixed bottom-5 right-5 z-50 flex items-center gap-2.5 rounded-xl px-4 py-3 text-xs font-medium text-white shadow-xl animate-in fade-in slide-in-from-bottom-3 duration-200 ${
+            toastKind === "error" ? "bg-red-600" : "bg-emerald-600"
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">
+          Memuat pengaturan dari database…
+        </div>
+      )}
+
+      {loadError && !isLoading && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={handleReload}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 font-semibold text-red-700 hover:bg-red-100 transition"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Coba lagi
+          </button>
         </div>
       )}
 
@@ -173,11 +169,11 @@ export default function PengaturanSistemPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleReset}
+            onClick={handleReload}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>Reset Default</span>
+            <span>Muat Ulang</span>
           </button>
           <button
             onClick={handleSave}
@@ -299,7 +295,7 @@ export default function PengaturanSistemPage() {
                 <input
                   type="text"
                   value={settings.pihkNumber}
-                  onChange={(e) => setSettings({ ...settings, pihikNumber: e.target.value } as any)}
+                  onChange={(e) => setSettings({ ...settings, pihkNumber: e.target.value })}
                   className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition"
                 />
               </div>

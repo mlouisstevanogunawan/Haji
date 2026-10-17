@@ -16,6 +16,7 @@ import {
 import { RoleBadge, ROLE_CONFIGS_MAP } from "./RoleBadge";
 import { BranchBadge } from "./BranchBadge";
 import { UserProfile, UserRole } from "@/types/database";
+import { getBranches, BranchRecord } from "@/services/branchService";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -34,11 +35,40 @@ export const UsersTable: React.FC<UsersTableProps> = ({
   onRefresh,
   onShowToast,
 }) => {
+  // Daftar cabang dimuat dari tabel branches Supabase — tidak ada cabang karangan.
+  const [branches, setBranches] = React.useState<BranchRecord[]>([]);
+
+  // Banner galat/berhasil inline (tidak memakai alert()).
+  const [notice, setNotice] = React.useState<{
+    kind: "error" | "success";
+    text: string;
+  } | null>(null);
+
+  const showToast = React.useCallback((kind: "error" | "success", text: string) => {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 4500);
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getBranches()
+      .then((rows) => {
+        if (!cancelled) setBranches(rows || []);
+      })
+      .catch((err) => {
+        console.error("Gagal memuat daftar cabang:", err);
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Edit State
   const [editingUser, setEditingUser] = React.useState<UserProfile | null>(null);
   const [editFullName, setEditFullName] = React.useState("");
   const [editRole, setEditRole] = React.useState<UserRole>("jamaah");
-  const [editBranch, setEditBranch] = React.useState("Kantor Pusat Jakarta");
+  const [editBranch, setEditBranch] = React.useState("");
   const [editPhone, setEditPhone] = React.useState("");
   const [editIsActive, setEditIsActive] = React.useState(true);
   const [isSubmittingEdit, setIsSubmittingEdit] = React.useState(false);
@@ -75,14 +105,29 @@ export const UsersTable: React.FC<UsersTableProps> = ({
     }
   };
 
+  // Opsi cabang: nilai yang disimpan ke /api/users adalah nama cabang (branch_name),
+  // jadi value memakai b.name. Cabang lama yang tidak lagi ada di tabel branches
+  // tetap ditampilkan supaya edit tidak diam-diam mengosongkannya.
+  const branchOptions = React.useMemo(() => {
+    const opts = [
+      { label: "— Pilih Cabang —", value: "" },
+      ...branches.map((b) => ({ label: b.name, value: b.name })),
+    ];
+    if (editBranch && !branches.some((b) => b.name === editBranch)) {
+      opts.push({ label: editBranch, value: editBranch });
+    }
+    return opts;
+  }, [branches, editBranch]);
+
   // Open Edit
   const handleOpenEdit = (user: UserProfile) => {
     setEditingUser(user);
     setEditFullName(user.full_name || "");
     setEditRole(user.role || "jamaah");
-    setEditBranch(user.branch_name || "Kantor Pusat Jakarta");
+    setEditBranch(user.branch_name || "");
     setEditPhone(user.phone || "");
     setEditIsActive(user.is_active ?? true);
+    setNotice(null);
   };
 
   // Submit Edit
@@ -111,10 +156,10 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         setEditingUser(null);
         if (onRefresh) onRefresh();
       } else {
-        alert(json.error || "Gagal memperbarui pengguna");
+        showToast("error", json.error || "Gagal memperbarui pengguna");
       }
     } catch (err: any) {
-      alert(err.message || "Terjadi kesalahan koneksi");
+      showToast("error", err.message || "Terjadi kesalahan koneksi");
     } finally {
       setIsSubmittingEdit(false);
     }
@@ -125,6 +170,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
     setResetUser(user);
     setGeneratedPassword(null);
     setHasCopied(false);
+    setNotice(null);
   };
 
   // Execute Reset Password
@@ -148,10 +194,10 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         onShowToast(`Kata sandi untuk ${resetUser.email} berhasil direset.`);
         if (onRefresh) onRefresh();
       } else {
-        alert(json.error || "Gagal mereset kata sandi");
+        showToast("error", json.error || "Gagal mereset kata sandi");
       }
     } catch (err: any) {
-      alert(err.message || "Gagal mereset kata sandi");
+      showToast("error", err.message || "Gagal mereset kata sandi");
     } finally {
       setIsResetting(false);
     }
@@ -185,14 +231,27 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         setDeletingUser(null);
         if (onRefresh) onRefresh();
       } else {
-        alert(json.error || "Gagal menghapus pengguna");
+        showToast("error", json.error || "Gagal menghapus pengguna");
       }
     } catch (err: any) {
-      alert(err.message || "Gagal menghapus pengguna");
+      showToast("error", err.message || "Gagal menghapus pengguna");
     } finally {
       setIsDeleting(false);
     }
   };
+
+  const noticeBanner = notice && (
+    <div
+      role="alert"
+      className={`rounded-lg border px-3 py-2.5 text-xs font-medium ${
+        notice.kind === "error"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      }`}
+    >
+      {notice.text}
+    </div>
+  );
 
   return (
     <>
@@ -316,7 +375,10 @@ export const UsersTable: React.FC<UsersTableProps> = ({
 
                           {/* Delete Button */}
                           <button
-                            onClick={() => setDeletingUser(user)}
+                            onClick={() => {
+                              setNotice(null);
+                              setDeletingUser(user);
+                            }}
                             title="Hapus / Nonaktifkan Pengguna"
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 transition shadow-sm"
                           >
@@ -342,6 +404,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         maxWidth="lg"
       >
         <form onSubmit={handleSaveEdit} className="space-y-4">
+          {noticeBanner}
           <Input
             label="Nama Lengkap *"
             value={editFullName}
@@ -382,12 +445,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
               label="Kantor Cabang"
               value={editBranch}
               onChange={(e) => setEditBranch(e.target.value)}
-              options={[
-                { label: "Pusat (Seluruh Cabang)", value: "Pusat (Seluruh Cabang)" },
-                { label: "Kantor Pusat Jakarta", value: "Kantor Pusat Jakarta" },
-                { label: "Cabang Surabaya", value: "Cabang Surabaya" },
-                { label: "Cabang Bandung", value: "Cabang Bandung" },
-              ]}
+              options={branchOptions}
             />
           </div>
 
@@ -443,6 +501,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         maxWidth="md"
       >
         <div className="space-y-4">
+          {noticeBanner}
           <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 border border-amber-200 flex items-start gap-2.5">
             <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
             <div>
@@ -520,6 +579,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         maxWidth="md"
       >
         <div className="space-y-4">
+          {noticeBanner}
           <p className="text-sm text-slate-600">
             Pilih tindakan untuk akun pengguna{" "}
             <strong>{deletingUser?.full_name}</strong> ({deletingUser?.email}):

@@ -97,10 +97,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           order_id: uniqueOrderId,
           gross_amount: chargeAmount,
           customer_details: {
-            name: invoice.pilgrimName && invoice.pilgrimName !== "-" ? invoice.pilgrimName : "Ahmad Fauzi",
-            email: invoice.email || "jamaah@almadinahtour.com",
-            phone: invoice.phone || "08123456789",
-            packageName: invoice.packageName && invoice.packageName !== "-" ? invoice.packageName : "Umroh Reguler Syawal 1447H",
+            // Nilai kosong dibiarkan undefined; /api/midtrans/create yang
+            // menyiapkan default netral ("Jamaah"), bukan nama orang tertentu.
+            name: invoice.pilgrimName && invoice.pilgrimName !== "-" ? invoice.pilgrimName : undefined,
+            email: invoice.email || undefined,
+            phone: invoice.phone && invoice.phone !== "-" ? invoice.phone : undefined,
+            packageName: invoice.packageName && invoice.packageName !== "-" ? invoice.packageName : "Tagihan Paket Umroh",
           },
           item_details: [
             {

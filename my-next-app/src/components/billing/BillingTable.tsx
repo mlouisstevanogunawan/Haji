@@ -2,7 +2,20 @@
 
 import * as React from "react";
 import { Clock, CheckCircle2, Receipt, RotateCcw } from "lucide-react";
-import { InvoiceItem } from "@/app/(dashboard)/tagihan-kasir/page";
+export interface InvoiceItem {
+  id: string;
+  invoiceNumber: string;
+  typeBadge: string;
+  bookingCode: string;
+  pilgrimName: string;
+  packageName: string;
+  phone?: string;
+  dueDate: string;
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  status: "Lunas" | "Sebagian" | "Belum Bayar";
+}
 
 export interface BillingTableProps {
   invoices: InvoiceItem[];

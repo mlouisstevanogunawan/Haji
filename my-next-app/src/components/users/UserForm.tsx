@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { UserRole } from "@/types/database";
+import { getBranches, BranchRecord } from "@/services/branchService";
 
 interface UserFormProps {
   onSuccess?: () => void;
@@ -16,11 +17,29 @@ interface UserFormProps {
 export const UserForm: React.FC<UserFormProps> = ({ onSuccess, onCancel }) => {
   const router = useRouter();
 
+  // Cabang diambil dari tabel branches Supabase; tanpa baris = tanpa cabang.
+  const [branches, setBranches] = React.useState<BranchRecord[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getBranches()
+      .then((rows) => {
+        if (!cancelled) setBranches(rows || []);
+      })
+      .catch((err) => {
+        console.error("Gagal memuat daftar cabang:", err);
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Form State
   const [fullName, setFullName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [role, setRole] = React.useState<UserRole>("admin_cabang");
-  const [branch, setBranch] = React.useState("Pusat (Seluruh Cabang)");
+  const [branch, setBranch] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [isActive, setIsActive] = React.useState(true);
   const [password, setPassword] = React.useState("");
@@ -136,7 +155,7 @@ export const UserForm: React.FC<UserFormProps> = ({ onSuccess, onCancel }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="ahmad@travel.com"
+                placeholder="Contoh: nama@travel.com"
                 required
                 className="flex h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:border-transparent"
               />
@@ -179,10 +198,12 @@ export const UserForm: React.FC<UserFormProps> = ({ onSuccess, onCancel }) => {
                   onChange={(e) => setBranch(e.target.value)}
                   className="flex h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:border-transparent pr-8"
                 >
-                  <option value="Pusat (Seluruh Cabang)">Pusat (Seluruh Cabang)</option>
-                  <option value="Kantor Pusat Jakarta">Kantor Pusat Jakarta</option>
-                  <option value="Cabang Surabaya">Cabang Surabaya</option>
-                  <option value="Cabang Bandung">Cabang Bandung</option>
+                  <option value="">— Pilih Cabang —</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.name}>
+                      {b.name}
+                    </option>
+                  ))}
                 </select>
                 <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
                   <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">

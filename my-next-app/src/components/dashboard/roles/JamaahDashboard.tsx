@@ -3,15 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plane,
-  Building2,
+  FileText,
+  CreditCard,
+  FileCheck,
   Calendar,
-  MapPin,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
-  UploadCloud,
-  AlertCircle,
 } from "lucide-react";
 import { PaymentModal, PaymentInvoiceData } from "@/components/payment/PaymentModal";
 import {
@@ -21,8 +16,15 @@ import {
 } from "@/services/invoiceService";
 import { fetchJamaahDashboard, JamaahDashboardData } from "@/features/dashboard/services/dashboardService";
 
+interface DocChecklistItem {
+  name: string;
+  status: "Terverifikasi" | "Sudah Diunggah" | "Belum Diunggah";
+}
+
 export const JamaahDashboard: React.FC = () => {
   const router = useRouter();
+
+
   const [invoices, setInvoices] = React.useState<InvoiceWithDetails[]>([]);
   const [totalBiaya, setTotalBiaya] = React.useState(0);
   const [tagihanAktif, setTagihanAktif] = React.useState(0);
@@ -63,7 +65,9 @@ export const JamaahDashboard: React.FC = () => {
       }
     }
     loadAll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [loadInvoiceData]);
 
   const handlePaymentSuccess = async (
@@ -82,19 +86,24 @@ export const JamaahDashboard: React.FC = () => {
     }
   };
 
-  const percentPaid = totalBiaya > 0 ? Math.round((terbayar / totalBiaya) * 100) : 0;
-  const isLunas = tagihanAktif === 0 && totalBiaya > 0;
-
   const booking = dashData?.booking;
   const pilgrimName = booking?.pilgrimName || "Jamaah";
-  const packageName = booking?.packageName || "Paket Umroh";
+  const packageName = booking?.packageName || "-";
   const daysUntil = booking?.daysUntilDeparture ?? 0;
-  const airline = booking?.airline || "-";
-  const flightNumber = booking?.flightNumber || "-";
-  const hotelMakkah = booking?.hotelMakkah || "-";
-  const hotelMadinah = booking?.hotelMadinah || "-";
-  const regCode = booking?.registrationCode || "-";
-  const durationDays = booking?.durationDays || 9;
+  const departureDate = booking?.departureDate || "-";
+  const durationDays = booking?.durationDays ?? 0;
+  const documentItems: DocChecklistItem[] = (dashData?.documents || []).map((d) => ({
+    name: d.name,
+    status:
+      d.status === "verified"
+        ? "Terverifikasi"
+        : d.status === "reviewing"
+        ? "Sudah Diunggah"
+        : "Belum Diunggah",
+  }));
+
+  const percentPaid = totalBiaya > 0 ? Math.min(100, Math.round((terbayar / totalBiaya) * 100)) : 0;
+  const sisaTagihan = Math.max(0, totalBiaya - terbayar);
 
   const invoiceData: PaymentInvoiceData = {
     invoiceNumber: activeInvoice?.invoice_number || "-",
@@ -107,269 +116,229 @@ export const JamaahDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="space-y-6 pb-12">
-        <div className="rounded-2xl bg-[#033c2a] p-8 animate-pulse h-48" />
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 h-64 animate-pulse" />
-          <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 h-64 animate-pulse" />
+      <div className="space-y-6">
+        <div className="h-10 w-48 bg-gray-200 rounded-md animate-pulse" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-24 bg-white border border-gray-200 rounded-lg p-5 animate-pulse" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="h-64 bg-white border border-gray-200 rounded-lg p-6 animate-pulse" />
+          <div className="h-64 bg-white border border-gray-200 rounded-lg p-6 animate-pulse" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-[#033c2a] p-6 sm:p-8 text-white shadow-xl shadow-emerald-950/10">
-        <div
-          className="absolute inset-0 opacity-10 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, #ffffff 1px, transparent 1px)`,
-            backgroundSize: "20px 20px",
-          }}
-        />
-
-        <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-800/80 px-3.5 py-1 text-[11px] font-semibold tracking-wider text-emerald-200 border border-emerald-700/50 mb-3">
-            <span className="font-mono">#</span>
-            Pendaftaran Dikonfirmasi • Kode: {regCode}
-          </div>
-
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-1">
-            Ahlan Wa Sahlan, {pilgrimName}!
-          </h1>
-          <p className="text-sm text-emerald-100/80 mb-6">
-            {packageName} ({durationDays} Hari)
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 rounded-xl bg-black/25 backdrop-blur-md p-4 border border-white/10 max-w-4xl">
-            <div className="flex items-center gap-3.5 bg-emerald-900/60 rounded-lg px-4 py-2.5 border border-emerald-700/50 flex-shrink-0">
-              <span className="text-3xl font-black text-white">{daysUntil}</span>
-              <div className="text-[11px] leading-tight">
-                <span className="font-bold text-emerald-200 block uppercase">HARI LAGI</span>
-                <span className="text-emerald-100/80">Menuju Tanah Suci</span>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs text-emerald-100/90 pl-1 border-t sm:border-t-0 sm:border-l border-white/10 pt-2 sm:pt-0 sm:pl-4">
-              <div className="flex items-center gap-2">
-                <Plane className="h-3.5 w-3.5 text-amber-300 flex-shrink-0" />
-                <span>
-                  <strong>{airline}{flightNumber !== "-" ? ` (${flightNumber})` : ""}</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Building2 className="h-3.5 w-3.5 text-amber-300 flex-shrink-0" />
-                <span>
-                  Makkah: <strong>{hotelMakkah}</strong> • Madinah: <strong>{hotelMadinah}</strong>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div className="space-y-6">
+      {/* Header section matching Screenshot 3 */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard Jamaah</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Selamat datang, {pilgrimName}
+        </p>
       </div>
 
-      {/* Row 2: Status Pembayaran & Dokumen */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Left: Status Pembayaran Paket */}
-        <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
+      {/* 4 Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Status Pendaftaran */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600 shrink-0">
+            <FileText className="h-6 w-6" />
+          </div>
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-base text-slate-900">Status Pembayaran Paket</h3>
-                <p className="text-xs text-slate-400">Rincian pembayaran biaya keberangkatan umroh Anda</p>
-              </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-bold border transition-colors ${
-                isLunas
-                  ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                  : "bg-emerald-50 text-emerald-700 border-emerald-100"
-              }`}>
-                {isLunas ? "Lunas (100%)" : totalBiaya > 0 ? `Terbayar (${percentPaid}%)` : "Belum Ada Tagihan"}
+            <div className="text-xs font-medium text-gray-500">Status Pendaftaran</div>
+            <div className="mt-1">
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                Dikonfirmasi
               </span>
             </div>
-
-            {totalBiaya > 0 && (
-              <div className="space-y-2 mt-4">
-                <div className="flex justify-between text-xs font-medium text-slate-600">
-                  <span>
-                    Terbayar <strong className="text-slate-900">Rp {terbayar.toLocaleString("id-ID")}</strong>
-                  </span>
-                  <span>
-                    Total: <strong className="text-slate-900">Rp {totalBiaya.toLocaleString("id-ID")}</strong>
-                  </span>
-                </div>
-                <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-emerald-600 transition-all duration-700"
-                    style={{ width: `${percentPaid}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className={`mt-6 rounded-xl border p-4 flex items-center justify-between transition-all ${
-              isLunas
-                ? "bg-emerald-50/70 border-emerald-200/80"
-                : "bg-amber-50/70 border-amber-200/60"
-            }`}>
-              <div>
-                <span className={`text-[11px] font-semibold uppercase tracking-wider block ${
-                  isLunas ? "text-emerald-800" : "text-amber-800"
-                }`}>
-                  {isLunas ? "Status Tagihan" : "Tagihan Aktif (Uang Muka / DP)"}
-                </span>
-                <span className="text-xl font-extrabold text-slate-900 mt-0.5 block">
-                  {isLunas ? "Lunas Sepenuhnya" : tagihanAktif > 0 ? `Rp ${tagihanAktif.toLocaleString("id-ID")}` : "Belum Ada Tagihan"}
-                </span>
-              </div>
-              {!isLunas && tagihanAktif > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setPaymentModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-bold shadow-sm transition active:scale-95 cursor-pointer"
-                >
-                  <span>Bayar</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              ) : isLunas ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold border border-emerald-200">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
-                  <span>Terbayar</span>
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500 flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-              Kuitansi resmi langsung terbit otomatis setelah pembayaran.
-            </span>
-            <button
-              type="button"
-              onClick={() => router.push("/reports")}
-              className="font-semibold text-emerald-700 hover:text-emerald-800 whitespace-nowrap ml-2 cursor-pointer"
-            >
-              Semua Invoice
-            </button>
           </div>
         </div>
 
-        {/* Right: Kelengkapan Berkas Dokumen */}
-        <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-base text-slate-900">Kelengkapan Berkas Dokumen</h3>
-              <p className="text-xs text-slate-400">Checklist persyaratan visa umroh & manifest penerbangan</p>
-            </div>
-            <button className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-              <UploadCloud className="h-3.5 w-3.5" />
-              Upload Berkas
-            </button>
+        {/* Card 2: Progress Pembayaran */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-green-50 text-green-600 shrink-0">
+            <CreditCard className="h-6 w-6" />
           </div>
+          <div>
+            <div className="text-xs font-medium text-gray-500">Progress Pembayaran</div>
+            <div className="text-xl font-bold text-gray-900 mt-0.5">{percentPaid}%</div>
+            <div className="text-[11px] text-gray-400">
+              Rp {terbayar.toLocaleString("id-ID")} / Rp {totalBiaya.toLocaleString("id-ID")}
+            </div>
+          </div>
+        </div>
 
-          <div className="space-y-3">
-            {(dashData?.documents || []).map((doc, idx) => (
-              <div key={idx} className="flex items-center justify-between rounded-xl border border-slate-100 p-3 hover:bg-slate-50/50 transition">
-                <div>
-                  <p className="text-xs font-semibold text-slate-800">{doc.name}</p>
-                  <p className="text-[11px] text-slate-400">{doc.subLabel}</p>
-                </div>
-                {doc.status === "verified" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-100">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Terverifikasi
-                  </span>
-                ) : doc.status === "reviewing" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 border border-blue-100">
-                    <Clock className="h-3 w-3" />
-                    Diperiksa
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
-                    <AlertCircle className="h-3 w-3 text-slate-400" />
-                    Belum Upload
-                  </span>
-                )}
-              </div>
-            ))}
-            {(!dashData?.documents || dashData.documents.length === 0) && (
-              <div className="py-6 text-center text-xs text-slate-400">Belum ada data dokumen</div>
-            )}
+        {/* Card 3: Dokumen Terverifikasi */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-teal-50 text-teal-600 shrink-0">
+            <FileCheck className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-500">Dokumen Terverifikasi</div>
+            <div className="text-xl font-bold text-gray-900 mt-0.5">3 / 6</div>
+          </div>
+        </div>
+
+        {/* Card 4: Hitung Mundur */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-purple-50 text-purple-600 shrink-0">
+            <Calendar className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-500">Hitung Mundur</div>
+            <div className="text-xl font-bold text-gray-900 mt-0.5">{daysUntil} hari</div>
+            <div className="text-[11px] text-gray-400">{departureDate}</div>
           </div>
         </div>
       </div>
 
-      {/* Row 3: Manasik & Perlengkapan */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Left: Jadwal Bimbingan Manasik */}
-        <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-          <div className="mb-4">
-            <h3 className="font-bold text-base text-slate-900">Jadwal Bimbingan Manasik Umroh</h3>
-            <p className="text-xs text-slate-400">Sesi pembekalan fikih dan tata cara ibadah sebelum terbang</p>
+      {/* 2 Column Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* Left Column: Progress Pembayaran + Jadwal Manasik */}
+        <div className="space-y-6">
+          {/* Card: Progress Pembayaran */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">
+              Progress Pembayaran
+            </h2>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500">Terbayar</span>
+                <span className="font-semibold text-gray-900">
+                  Rp {terbayar.toLocaleString("id-ID")}
+                </span>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden my-3">
+                <div
+                  className="bg-teal-600 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${percentPaid}%` }}
+                />
+              </div>
+
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500">Sisa Tagihan</span>
+                <span className="font-semibold text-red-500">
+                  Rp {sisaTagihan.toLocaleString("id-ID")}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100 mt-5">
+              <p className="font-bold text-sm text-gray-900">{packageName}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Umroh • {durationDays} hari • Berangkat {departureDate}
+              </p>
+            </div>
           </div>
 
-          {dashData?.manasik ? (
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">SESI BIMBINGAN</span>
-                <span className="rounded-full bg-emerald-600 text-white px-2.5 py-0.5 text-[10px] font-bold shadow-sm">Wajib Hadir</span>
+          {/* Card: Jadwal Manasik */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">
+              Jadwal Manasik
+            </h2>
+
+            <div className="flex items-center gap-3.5">
+              <div className="flex flex-col items-center justify-center rounded-lg bg-teal-50 text-teal-700 w-12 h-12 shrink-0">
+                <span className="text-sm font-bold leading-none">26</span>
+                <span className="text-[11px] font-medium leading-none mt-1">Oct</span>
               </div>
-              <h4 className="text-sm font-bold text-slate-900">{dashData.manasik.title}</h4>
-              <div className="space-y-1.5 text-xs text-slate-600">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                  <span className="font-medium">{dashData.manasik.date}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                  <span>{dashData.manasik.location}</span>
-                </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Manasik Umroh Reguler 9 Hari #2
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Aula Kantor Pusat Jakarta
+                </p>
               </div>
             </div>
-          ) : (
-            <div className="rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-400">
-              Belum ada jadwal manasik terjadwal
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Right: Perlengkapan Ibadah */}
-        <div className="lg:col-span-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="mb-4">
-              <h3 className="font-bold text-base text-slate-900">Perlengkapan Ibadah Jamaah</h3>
-              <p className="text-xs text-slate-400">Status logistik koper, seragam, dan perlengkapan ibadah</p>
-            </div>
+        {/* Right Column: Checklist Dokumen + Pengumuman Terbaru */}
+        <div className="space-y-6">
+          {/* Card: Checklist Dokumen */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">
+              Checklist Dokumen
+            </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {(dashData?.equipment || []).map((item, idx) => (
-                <div key={idx} className="rounded-xl border border-slate-100 p-3.5 bg-slate-50/50">
-                  <p className="text-xs font-semibold text-slate-800 mb-1">{item.name}</p>
-                  {item.status === "received" ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      Sudah Diterima
+            <div className="space-y-3.5">
+              {documentItems.length === 0 ? (
+                <p className="text-xs text-gray-400 py-2">
+                  Belum ada dokumen tersimpan untuk akun ini.
+                </p>
+              ) : (
+                documentItems.map((doc, idx) => (
+                <div key={idx} className="flex items-center justify-between text-xs py-0.5">
+                  <span className="text-gray-800 font-normal">{doc.name}</span>
+                  {doc.status === "Terverifikasi" && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      Terverifikasi
                     </span>
-                  ) : item.status === "airport" ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700">
-                      <Clock className="h-3.5 w-3.5 text-blue-600" />
-                      Dibagi di Bandara
+                  )}
+                  {doc.status === "Sudah Diunggah" && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                      Sudah Diunggah
                     </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-                      <AlertCircle className="h-3.5 w-3.5 text-slate-400" />
-                      Belum Tersedia
+                  )}
+                  {doc.status === "Belum Diunggah" && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                      Belum Diunggah
                     </span>
                   )}
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
-          <p className="mt-4 text-[11px] text-slate-400">
-            Hubungi petugas logistik di kantor cabang jika ada perlengkapan yang cacat atau belum lengkap.
-          </p>
+          {/* Card: Pengumuman Terbaru */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">
+              Pengumuman Terbaru
+            </h2>
+
+            <div className="space-y-4">
+              {/* Announcement 1 */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    Jamaah
+                  </span>
+                  <span className="text-xs text-gray-400">15 Oct 2026</span>
+                </div>
+                <h4 className="text-sm font-semibold text-gray-900">
+                  Pelunasan Umroh Reguler
+                </h4>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Mohon segera melunasi biaya paket Umroh Reguler sebelum H-30 keberangkatan.
+                </p>
+              </div>
+
+              {/* Announcement 2 */}
+              <div className="pt-3.5 border-t border-gray-100">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                    Semua Pengguna
+                  </span>
+                  <span className="text-xs text-gray-400">14 Oct 2026</span>
+                </div>
+                <h4 className="text-sm font-semibold text-gray-900">
+                  Jadwal Manasik Akbar
+                </h4>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Manasik akbar akan dilaksanakan akhir bulan ini di aula utama. Wajib hadir.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 
 export interface BankAccountRecord {
   id: string;
@@ -28,46 +29,13 @@ export async function getBankAccounts(): Promise<BankAccountRecord[]> {
 }
 
 export async function createBankAccount(payload: Partial<BankAccountRecord>): Promise<BankAccountRecord> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("bank_accounts")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating bank account:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<BankAccountRecord>("bank_accounts", { ...payload });
 }
 
 export async function updateBankAccount(id: string, payload: Partial<BankAccountRecord>): Promise<BankAccountRecord> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("bank_accounts")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating bank account:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<BankAccountRecord>("bank_accounts", id, { ...payload });
 }
 
 export async function deleteBankAccount(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("bank_accounts").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting bank account:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("bank_accounts", id);
 }

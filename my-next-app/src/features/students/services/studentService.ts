@@ -1,65 +1,92 @@
 import { Pilgrim } from "@/types/database.types";
+import { PaymentStatus } from "@/types/common.types";
 import { PilgrimFormData } from "../types/student.types";
-import { createClient } from "@/lib/supabase/client";
+import { dbRead, dbUpsert, dbUpdate, dbDelete } from "@/lib/db/write";
+
+// Petakan field form ke kolom `profiles` yang nyata. City -> address, paymentStatus -> status.
+function mapPilgrimColumns(input: PilgrimFormData & Partial<Pilgrim>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (input.fullName) out.full_name = input.fullName;
+  if (input.email) out.email = input.email;
+  if (input.phone) out.phone = input.phone;
+  if (input.gender) out.gender = input.gender;
+  if (input.nik) out.nik = input.nik;
+  if (input.passportNumber) out.passport_number = input.passportNumber;
+  if (input.city) out.address = input.city;
+  if (input.paymentStatus) out.status = input.paymentStatus;
+  return out;
+}
+
+const PAYMENT_STATUSES: PaymentStatus[] = ["Lunas", "DP", "Belum Bayar"];
 
 export async function getPilgrims(): Promise<Pilgrim[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .in("role", ["jamaah", "jamaah_umroh"])
-    .order("created_at", { ascending: false });
+  const rows = await dbRead<Record<string, any>>("profiles", {
+    select: "*",
+    in: { role: ["jamaah", "jamaah_umroh"] },
+    order: "created_at",
+    desc: true,
+  });
 
-  if (error) {
-    console.error("Error fetching pilgrims from Supabase:", error.message);
-    throw new Error(error.message);
-  }
-
-  return (data || []).map((p: any) => ({
+  // Semua nilai diambil dari kolom `profiles`. Field yang belum punya kolom
+  // (paket, keberangkatan, visa, pembayaran) sengaja diberi nilai kosong, bukan
+  // contoh, supaya UI tidak menampilkan angka yang tidak ada di database.
+  return rows.map((p) => ({
     id: p.id,
     fullName: p.full_name || p.email || "Jamaah",
-    passportNumber: p.raw_user_meta_data?.passportNumber || "-",
-    nik: p.raw_user_meta_data?.nik || "-",
-    gender: (p.raw_user_meta_data?.gender as "Laki-laki" | "Perempuan") || "Laki-laki",
+    passportNumber: p.passport_number || "-",
+    nik: p.nik || "-",
+    gender: (p.gender === "Perempuan" ? "Perempuan" : "Laki-laki") as
+      | "Laki-laki"
+      | "Perempuan",
     phone: p.phone || "-",
     email: p.email || "-",
-    city: p.raw_user_meta_data?.city || "Jakarta",
-    packageId: p.raw_user_meta_data?.packageId || "",
-    packageName: p.raw_user_meta_data?.packageName || "Umroh Reguler",
-    departureDate: p.raw_user_meta_data?.departureDate || "2026-11-15",
-    paymentStatus: (p.raw_user_meta_data?.paymentStatus as any) || "Lunas",
-    totalPaid: Number(p.raw_user_meta_data?.totalPaid) || 0,
-    remainingAmount: Number(p.raw_user_meta_data?.remainingAmount) || 0,
-    visaStatus: (p.raw_user_meta_data?.visaStatus as any) || "Pending",
-    documentStatus: (p.raw_user_meta_data?.documentStatus as any) || "Diverifikasi",
+    city: p.address || "-",
+    packageId: "",
+    packageName: "-",
+    departureDate: "-",
+    paymentStatus: (PAYMENT_STATUSES.includes(p.status) ? p.status : "Belum Bayar") as PaymentStatus,
+    totalPaid: 0,
+    remainingAmount: 0,
+    visaStatus: "Pending" as const,
+    documentStatus: "Belum Lengkap" as const,
     registrationDate: p.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
-    notes: p.raw_user_meta_data?.notes,
   }));
 }
 
 export async function createPilgrim(input: PilgrimFormData): Promise<Pilgrim> {
-  const supabase = createClient();
-  const id = crypto.randomUUID();
+  const columns = mapPilgrimColumns(input);
+  const email = input.email || `jamaah.${Date.now()}@travel.com`;
+  const fullName = input.fullName || "Jamaah";
+  columns.email = email;
+  columns.full_name = fullName;
+  columns.role = "jamaah";
+  columns.is_active = true;
 
-  const newProfile = {
-    id,
-    full_name: input.fullName,
-    phone: input.phone,
-    email: input.email || `jamaah.${Date.now()}@travel.com`,
-    role: "jamaah",
-    is_active: true,
-  };
-
-  const { data, error } = await supabase
-    .from("profiles")
-    .insert([newProfile])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating pilgrim in Supabase:", error.message);
-    throw new Error(error.message);
+  // profiles.id FK ke auth.users; daftarkan user auth nyata lewat /api/users
+  // (service-role) lebih dulu supaya insert profil tidak kena FK 23503.
+  const res = await fetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password: crypto.randomUUID(),
+      full_name: fullName,
+      role: "jamaah",
+      phone: input.phone ?? null,
+      is_active: true,
+    }),
+  });
+  const json = await res.json().catch(() => ({} as any));
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || "Gagal membuat akun jamaah");
   }
+  const id = json.data.id as string;
+
+  const data = await dbUpsert<{ id: string; full_name: string | null }>(
+    "profiles",
+    { ...columns, id },
+    { id }
+  );
 
   return {
     id: data.id,
@@ -84,22 +111,11 @@ export async function createPilgrim(input: PilgrimFormData): Promise<Pilgrim> {
 }
 
 export async function updatePilgrim(id: string, input: PilgrimFormData): Promise<Pilgrim> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .update({
-      full_name: input.fullName,
-      phone: input.phone,
-      email: input.email,
-    })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating pilgrim in Supabase:", error.message);
-    throw new Error(error.message);
-  }
+  const data = await dbUpdate<{ id: string; full_name: string | null }>(
+    "profiles",
+    id,
+    mapPilgrimColumns(input)
+  );
 
   return {
     id: data.id,
@@ -124,13 +140,5 @@ export async function updatePilgrim(id: string, input: PilgrimFormData): Promise
 }
 
 export async function deletePilgrim(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("profiles").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting pilgrim in Supabase:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("profiles", id);
 }

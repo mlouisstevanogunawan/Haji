@@ -2,22 +2,13 @@
 
 import * as React from "react";
 import {
-  Building,
-  CreditCard,
   Plus,
-  Copy,
-  Check,
-  Edit2,
-  Trash2,
-  X,
   CheckCircle2,
-  Building2,
 } from "lucide-react";
+import Link from "next/link";
 
 import {
   getBankAccounts,
-  createBankAccount,
-  updateBankAccount,
   deleteBankAccount,
   BankAccountRecord,
 } from "@/services/bankAccountService";
@@ -25,53 +16,45 @@ import {
 export interface BankAccountItem {
   id: string;
   bankName: string;
-  branchName: string; // KCP
   accountNumber: string;
-  accountHolder: string; // a.n.
-  officeBranch: string; // Kantor Cabang
-  status: "Aktif" | "Nonaktif";
+  accountHolder: string;
+  officeBranch: string;
+  branchName: string;
+  isActive: boolean;
 }
 
 function mapRecordToBankAccountItem(r: BankAccountRecord): BankAccountItem {
   return {
     id: r.id,
     bankName: r.bank_name,
-    branchName: r.branch_name || "-",
     accountNumber: r.account_number,
     accountHolder: r.account_holder,
-    officeBranch: r.office_branch || "Kantor Pusat Jakarta",
-    status: r.is_active ? "Aktif" : "Nonaktif",
+    officeBranch: r.office_branch ?? "",
+    branchName: r.branch_name ?? "",
+    isActive: r.is_active !== false,
   };
 }
 
 export default function RekeningBankPage() {
   const [accounts, setAccounts] = React.useState<BankAccountItem[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [copiedId, setCopiedId] = React.useState<string | null>(null);
-
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = React.useState<boolean>(false);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-
-  // Form Fields
-  const [formBankName, setFormBankName] = React.useState("");
-  const [formBranchName, setFormBranchName] = React.useState("");
-  const [formAccountNumber, setFormAccountNumber] = React.useState("");
-  const [formAccountHolder, setFormAccountHolder] = React.useState("PT Al-Madinah Wisata Syariah");
-  const [formOfficeBranch, setFormOfficeBranch] = React.useState("Kantor Pusat Jakarta");
-  const [formIsActive, setFormIsActive] = React.useState<boolean>(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [appliedSearch, setAppliedSearch] = React.useState("");
 
   // Toast
-  const [toastMessage, setToastMessage] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ kind: "error" | "success"; text: string } | null>(null);
 
   const loadAccounts = React.useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const records = await getBankAccounts();
-      setAccounts(records.map(mapRecordToBankAccountItem));
+      setAccounts((records || []).map(mapRecordToBankAccountItem));
     } catch (err: unknown) {
       console.error("Gagal memuat rekening bank dari Supabase:", err);
       setAccounts([]);
+      setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoading(false);
     }
@@ -81,67 +64,9 @@ export default function RekeningBankPage() {
     loadAccounts();
   }, [loadAccounts]);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
-
-  const handleCopy = (acc: BankAccountItem) => {
-    navigator.clipboard.writeText(acc.accountNumber);
-    setCopiedId(acc.id);
-    showToast(`Nomor rekening ${acc.accountNumber} disalin!`);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const handleOpenAdd = () => {
-    setEditingId(null);
-    setFormBankName("Bank Mandiri");
-    setFormBranchName("KCP Thamrin Jakarta");
-    setFormAccountNumber("");
-    setFormAccountHolder("PT Al-Madinah Wisata Syariah");
-    setFormOfficeBranch("Kantor Pusat Jakarta");
-    setFormIsActive(true);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (item: BankAccountItem) => {
-    setEditingId(item.id);
-    setFormBankName(item.bankName);
-    setFormBranchName(item.branchName);
-    setFormAccountNumber(item.accountNumber);
-    setFormAccountHolder(item.accountHolder);
-    setFormOfficeBranch(item.officeBranch);
-    setFormIsActive(item.status === "Aktif");
-    setIsModalOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formBankName.trim() || !formAccountNumber.trim()) return;
-
-    try {
-      const payload: Partial<BankAccountRecord> = {
-        bank_name: formBankName.trim(),
-        branch_name: formBranchName.trim(),
-        account_number: formAccountNumber.trim(),
-        account_holder: formAccountHolder.trim() || "PT Al-Madinah Wisata Syariah",
-        office_branch: formOfficeBranch,
-        is_active: formIsActive,
-      };
-
-      if (editingId) {
-        await updateBankAccount(editingId, payload);
-        showToast("Data rekening berhasil diperbarui di Supabase!");
-      } else {
-        await createBankAccount(payload);
-        showToast("Rekening bank baru berhasil ditambahkan ke Supabase!");
-      }
-      await loadAccounts();
-      setIsModalOpen(false);
-    } catch (err: unknown) {
-      console.error("Gagal menyimpan rekening:", err);
-      showToast("Gagal menyimpan rekening ke database Supabase.");
-    }
+  const showToast = (kind: "error" | "success", text: string) => {
+    setToast({ kind, text });
+    setTimeout(() => setToast(null), 4500);
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -149,266 +74,192 @@ export default function RekeningBankPage() {
       try {
         await deleteBankAccount(id);
         await loadAccounts();
-        showToast("Rekening bank berhasil dihapus dari Supabase.");
+        showToast("success", "Rekening bank berhasil dihapus.");
       } catch (err: unknown) {
-        console.error("Gagal menghapus rekening:", err);
-        showToast("Gagal menghapus rekening dari Supabase.");
+        console.error("Gagal menghapus rekening bank:", err);
+        showToast("error", `Gagal menghapus rekening bank: ${(err as Error).message}`);
       }
     }
   };
 
+  const filteredAccounts = accounts.filter((item) => {
+    const q = appliedSearch.toLowerCase().trim();
+    return (
+      !q ||
+      item.bankName.toLowerCase().includes(q) ||
+      item.accountNumber.toLowerCase().includes(q) ||
+      item.accountHolder.toLowerCase().includes(q) ||
+      item.officeBranch.toLowerCase().includes(q) ||
+      item.branchName.toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="space-y-6 pb-12">
       {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-800 text-white px-4 py-3 text-xs font-medium shadow-lg animate-fade-in">
-          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-          <span>{toastMessage}</span>
+      {toast && (
+        <div
+          role="status"
+          className={`fixed top-20 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-medium shadow-lg animate-fade-in ${
+            toast.kind === "error"
+              ? "bg-red-600 text-white"
+              : "bg-teal-800 text-white"
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4 text-teal-300" />
+          <span>{toast.text}</span>
         </div>
       )}
 
-      {/* Header section (Screenshot 1) */}
+      {/* Breadcrumb & Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <Building className="h-5 w-5 stroke-[2.2]" />
+        <div>
+          <div className="text-xs text-gray-400 mb-1">
+            <Link href="/dashboard" className="hover:text-gray-600 transition">
+              Beranda
+            </Link>{" "}
+            &gt; <span className="text-gray-600">Rekening Bank</span>
           </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Rekening Bank Penampung
-            </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Daftar rekening bank resmi untuk setoran pendaftaran, cicilan, dan pelunasan paket jamaah.
-            </p>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+            Rekening Bank
+          </h1>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Daftar rekening bank penerimaan pembayaran
+          </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
+        <Link
+          href="/rekening-bank/tambah"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[#0d9488] hover:bg-[#0f766e] text-white px-4 py-2.5 text-xs font-semibold shadow-xs transition active:scale-95 cursor-pointer self-start sm:self-center"
         >
           <Plus className="h-4 w-4" />
           <span>Tambah Rekening</span>
+        </Link>
+      </div>
+
+      {/* Filter / Search Bar */}
+      <div className="rounded-xl border border-gray-200/80 bg-white p-3 shadow-xs flex items-center gap-3">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") setAppliedSearch(searchQuery);
+          }}
+          placeholder="Cari nama bank..."
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 placeholder-gray-400 w-full sm:w-60 focus:outline-none focus:ring-1 focus:ring-teal-500"
+        />
+
+        <button
+          onClick={() => setAppliedSearch(searchQuery)}
+          className="rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 text-xs font-medium transition cursor-pointer"
+        >
+          Cari
         </button>
       </div>
 
-      {/* Bank Account Cards Grid (Screenshot 1) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {accounts.map((acc) => (
-          <div
-            key={acc.id}
-            className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs hover:shadow-md transition duration-200 flex flex-col justify-between"
-          >
-            {/* Top row */}
-            <div>
-              <div className="flex items-start justify-between gap-2 mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                    <CreditCard className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-xs sm:text-sm text-slate-900 leading-tight">
-                      {acc.bankName}
-                    </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {acc.branchName}
-                    </p>
-                  </div>
-                </div>
-                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200/60">
-                  {acc.status}
-                </span>
-              </div>
+      {/* Table Data (Matching Screenshot 5) */}
+      <div className="rounded-xl border border-gray-200/80 bg-white shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-gray-50/80 border-b border-gray-200/80 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-6">BANK</th>
+                <th className="py-3 px-6">NO. REKENING</th>
+                <th className="py-3 px-6">ATAS NAMA</th>
+                <th className="py-3 px-6">CABANG</th>
+                <th className="py-3 px-6">STATUS</th>
+                <th className="py-3 px-6 text-right">AKSI</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 text-gray-700">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400 text-xs">
+                    Memuat data rekening dari Supabase...
+                  </td>
+                </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-red-500 text-xs">
+                    Gagal memuat rekening dari Supabase: {loadError}
+                  </td>
+                </tr>
+              ) : filteredAccounts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400 text-xs">
+                    {accounts.length === 0
+                      ? "Belum ada rekening bank tersimpan di Supabase."
+                      : "Tidak ada rekening bank yang sesuai dengan pencarian."}
+                  </td>
+                </tr>
+              ) : (
+                filteredAccounts.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50/70 transition">
+                    {/* Bank */}
+                    <td className="py-4 px-6 font-medium text-gray-900 whitespace-nowrap">
+                      {item.bankName}
+                    </td>
 
-              {/* Account Number Box */}
-              <div className="my-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Nomor Rekening
-                  </span>
-                  <button
-                    onClick={() => handleCopy(acc)}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 hover:text-emerald-800 transition cursor-pointer"
-                  >
-                    {copiedId === acc.id ? (
-                      <>
-                        <Check className="h-3 w-3 text-emerald-600" />
-                        <span className="text-emerald-600 font-semibold">Tersalin</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3" />
-                        <span>Salin</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-                <p className="font-mono text-base sm:text-lg font-bold tracking-wider text-slate-900">
-                  {acc.accountNumber}
-                </p>
-                <p className="text-xs text-slate-600 mt-1 font-medium">
-                  a.n. {acc.accountHolder}
-                </p>
-              </div>
-            </div>
+                    {/* No. Rekening */}
+                    <td className="py-4 px-6 text-gray-600 font-mono whitespace-nowrap">
+                      {item.accountNumber}
+                    </td>
 
-            {/* Bottom Row */}
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between mt-3 text-slate-400 text-xs">
-              <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
-                <Building2 className="h-3.5 w-3.5 text-slate-400" />
-                <span>{acc.officeBranch}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleOpenEdit(acc)}
-                  title="Ubah Rekening"
-                  className="p-1 hover:text-emerald-700 transition cursor-pointer"
-                >
-                  <Edit2 className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => handleDelete(acc.id, acc.bankName)}
-                  title="Hapus Rekening"
-                  className="p-1 hover:text-red-600 transition cursor-pointer"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+                    {/* Atas Nama */}
+                    <td className="py-4 px-6 text-gray-600 whitespace-nowrap">
+                      {item.accountHolder}
+                    </td>
 
-      {/* Modal Popup Tambah/Edit Rekening */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-            <div className="flex items-start justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                  <CreditCard className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {editingId ? "Edit Rekening Bank" : "Tambah Rekening Bank Baru"}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Informasi rekening penampung setoran jamaah
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+                    {/* Cabang */}
+                    <td className="py-4 px-6 text-gray-600 whitespace-nowrap">
+                      {item.officeBranch || item.branchName || (
+                        <span className="text-gray-400">Belum diisi</span>
+                      )}
+                      {item.branchName && item.officeBranch && (
+                        <span className="block text-[10px] text-gray-400">
+                          Cabang: {item.branchName}
+                        </span>
+                      )}
+                    </td>
 
-            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  NAMA BANK <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formBankName}
-                  onChange={(e) => setFormBankName(e.target.value)}
-                  placeholder="Contoh: Bank Mandiri atau Bank Syariah Indonesia"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/40 p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
+                    {/* Status */}
+                    <td className="py-4 px-6 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${
+                          item.isActive
+                            ? "bg-teal-50 text-teal-700 border-teal-200/60"
+                            : "bg-gray-100 text-gray-600 border-gray-200"
+                        }`}
+                      >
+                        {item.isActive ? "Aktif" : "Nonaktif"}
+                      </span>
+                    </td>
 
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  KANTOR CABANG PEMBANTU (KCP)
-                </label>
-                <input
-                  type="text"
-                  value={formBranchName}
-                  onChange={(e) => setFormBranchName(e.target.value)}
-                  placeholder="Contoh: KCP Kebon Sirih Jakarta"
-                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  NOMOR REKENING <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formAccountNumber}
-                  onChange={(e) => setFormAccountNumber(e.target.value)}
-                  placeholder="Contoh: 1230009876543"
-                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  ATAS NAMA REKENING
-                </label>
-                <input
-                  type="text"
-                  value={formAccountHolder}
-                  onChange={(e) => setFormAccountHolder(e.target.value)}
-                  placeholder="PT Al-Madinah Wisata Syariah"
-                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  KANTOR CABANG PENGELOLA
-                </label>
-                <select
-                  value={formOfficeBranch}
-                  onChange={(e) => setFormOfficeBranch(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                >
-                  <option>Kantor Pusat Jakarta</option>
-                  <option>Cabang Bandung</option>
-                  <option>Cabang Surabaya</option>
-                </select>
-              </div>
-
-              <div className="pt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={formIsActive}
-                    onChange={(e) => setFormIsActive(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="text-xs text-slate-700 font-medium">
-                    Rekening Aktif (Tersedia untuk pembayaran jamaah)
-                  </span>
-                </label>
-              </div>
-
-              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-semibold transition cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-xs transition active:scale-95 cursor-pointer"
-                >
-                  {editingId ? "Simpan Perubahan" : "Tambah Rekening"}
-                </button>
-              </div>
-            </form>
-          </div>
+                    {/* Aksi */}
+                    <td className="py-4 px-6 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-3">
+                        <Link
+                          href={`/rekening-bank/edit/${item.id}`}
+                          className="text-teal-600 hover:text-teal-700 font-medium transition cursor-pointer"
+                        >
+                          Edit
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(item.id, item.bankName)}
+                          className="text-red-500 hover:text-red-600 font-medium transition cursor-pointer"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -1,106 +1,153 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
-  Search,
   Filter,
-  UserPlus,
+  Plus,
   ChevronDown,
-  Calendar,
   Eye,
+  Edit2,
   Trash2,
-  ArrowLeft,
+  X,
   CheckCircle2,
-  Info,
+  Calendar,
 } from "lucide-react";
-
 import {
   getBookings,
   createBooking,
+  updateBooking,
   deleteBooking,
   BookingWithDetails,
 } from "@/services/bookingService";
 import { getPackages, PackageRow } from "@/services/packageService";
 import { getJamaahList, JamaahProfile } from "@/services/jamaahService";
 import { getGuides, GuideRow } from "@/services/guideService";
+import { getInvoices } from "@/services/invoiceService";
+import { useRole } from "@/context/RoleContext";
 
 interface RegistrationItem {
   id: string;
   code: string;
   jamaahName: string;
-  jamaahPhone: string;
+  pilgrimId: string | null;
   packageName: string;
-  packagePrice: string;
-  status: "Pending" | "Dikonfirmasi" | "Batal";
-  paymentStatus: "Belum Bayar" | "Sebagian" | "Lunas";
+  status: "Dikonfirmasi" | "Pending" | "Batal";
+  paymentStatus: "Lunas" | "Sebagian" | "Belum Bayar";
   registrationDate: string;
+  phone?: string;
+  price?: string;
 }
 
-function mapBookingToRegistrationItem(b: BookingWithDetails): RegistrationItem {
-  const statusMap: Record<string, "Pending" | "Dikonfirmasi" | "Batal"> = {
-    pending: "Pending",
-    confirmed: "Dikonfirmasi",
-    completed: "Dikonfirmasi",
-    cancelled: "Batal",
-  };
+interface RingkasanBayar {
+  total: number;
+  paid: number;
+}
 
+const STATUS_LABEL: Record<string, RegistrationItem["status"]> = {
+  pending: "Pending",
+  confirmed: "Dikonfirmasi",
+  completed: "Dikonfirmasi",
+  cancelled: "Batal",
+};
+
+function mapBookingToRegistrationItem(
+  b: BookingWithDetails,
+  bayar?: RingkasanBayar
+): RegistrationItem {
   let regDate = b.created_at;
   try {
     regDate = new Date(b.created_at).toLocaleDateString("id-ID", {
-      day: "numeric",
+      day: "2-digit",
       month: "short",
       year: "numeric",
     });
   } catch {}
 
+  // Status bayar dihitung dari tagihan (invoices) milik booking ini, bukan dari
+  // kolom status booking.
+  const total = Number(bayar?.total || 0);
+  const paid = Number(bayar?.paid || 0);
+  let payStatus: "Lunas" | "Sebagian" | "Belum Bayar" = "Belum Bayar";
+  if (total > 0 && paid >= total) {
+    payStatus = "Lunas";
+  } else if (paid > 0) {
+    payStatus = "Sebagian";
+  }
+
   return {
     id: b.id,
-    code: `REG-${b.id.slice(0, 6).toUpperCase()}`,
-    jamaahName: b.profiles?.full_name || "Jamaah",
-    jamaahPhone: b.profiles?.phone || "-",
-    packageName: b.packages?.name || "Paket Umroh",
-    packagePrice: `Rp ${Number(b.total_price || b.packages?.price || 0).toLocaleString("id-ID")}`,
-    status: statusMap[b.status] || "Pending",
-    paymentStatus: b.status === "confirmed" ? "Lunas" : "Belum Bayar",
+    code: b.invoice_number || `REG-${b.id.slice(0, 5).toUpperCase()}`,
+    jamaahName: b.profiles?.full_name || "-",
+    pilgrimId: b.pilgrim_id ?? null,
+    packageName: b.packages?.name || "-",
+    status: STATUS_LABEL[b.status] || "Pending",
+    paymentStatus: payStatus,
     registrationDate: regDate,
+    phone: b.profiles?.phone || "-",
+    price: `Rp ${Number(b.total_price || b.packages?.price || 0).toLocaleString("id-ID")}`,
   };
 }
 
 export default function PendaftaranPage() {
+  const { role, user } = useRole();
+  const isJamaah = role === "jamaah_umroh";
+  const userId = user.id;
+
   const [registrations, setRegistrations] = React.useState<RegistrationItem[]>([]);
   const [packages, setPackages] = React.useState<PackageRow[]>([]);
   const [pilgrims, setPilgrims] = React.useState<JamaahProfile[]>([]);
-  const [guides, setGuides] = React.useState<GuideRow[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [, setGuides] = React.useState<GuideRow[]>([]);
+  const [, setIsLoading] = React.useState(true);
 
-  const [searchTerm, setSearchTerm] = React.useState("");
+  // Filters
   const [statusFilter, setStatusFilter] = React.useState("Semua Status");
   const [packageFilter, setPackageFilter] = React.useState("Semua Paket");
-  const [isAdding, setIsAdding] = React.useState(false);
+  const [appliedStatus, setAppliedStatus] = React.useState("Semua Status");
+  const [appliedPackage, setAppliedPackage] = React.useState("Semua Paket");
 
-  // Booking Form States
+  // Modals
+  const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [detailItem, setDetailItem] = React.useState<RegistrationItem | null>(null);
+  const [editItem, setEditItem] = React.useState<RegistrationItem | null>(null);
+
+  // Form states
   const [selectedPilgrimId, setSelectedPilgrimId] = React.useState("");
   const [selectedPkgId, setSelectedPkgId] = React.useState("");
-  const [selectedMuthawif, setSelectedMuthawif] = React.useState("");
   const [bookingDate, setBookingDate] = React.useState(new Date().toISOString().split("T")[0]);
-  const [specialNotes, setSpecialNotes] = React.useState("");
 
   const loadData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-      const [bks, pkgs, plgs, gds] = await Promise.all([
+      const [bks, pkgs, plgs, gds, invoices] = await Promise.all([
         getBookings(),
         getPackages(),
         getJamaahList(),
         getGuides().catch(() => []),
+        getInvoices().catch(() => []),
       ]);
-      setRegistrations(bks.map(mapBookingToRegistrationItem));
-      setPackages(pkgs);
-      setPilgrims(plgs);
-      setGuides(gds);
+
+      // Ringkasan pembayaran per booking, diambil dari tabel invoices asli.
+      const bayarPerBooking = new Map<string, RingkasanBayar>();
+      invoices.forEach((inv) => {
+        const bookingId = inv.bookings?.id;
+        if (!bookingId) return;
+        const prev = bayarPerBooking.get(bookingId) || { total: 0, paid: 0 };
+        bayarPerBooking.set(bookingId, {
+          total: prev.total + (Number(inv.amount) || 0),
+          paid: prev.paid + (Number(inv.paid_amount) || 0),
+        });
+      });
+
+      setRegistrations(
+        (bks || []).map((b) => mapBookingToRegistrationItem(b, bayarPerBooking.get(b.id)))
+      );
+      setPackages(pkgs || []);
+      setPilgrims(plgs || []);
+      setGuides(gds || []);
     } catch (err: unknown) {
       console.error("Gagal memuat data pendaftaran:", err);
-      setRegistrations([]);
+      alert(`Gagal memuat data pendaftaran: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
@@ -110,15 +157,28 @@ export default function PendaftaranPage() {
     loadData();
   }, [loadData]);
 
-  const chosenPackage = packages.find((p) => p.id === selectedPkgId);
+  const handleApplyFilter = () => {
+    setAppliedStatus(statusFilter);
+    setAppliedPackage(packageFilter);
+  };
 
   const filteredList = registrations.filter((item) => {
-    const matchesSearch =
-      item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.jamaahName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.jamaahPhone.includes(searchTerm);
-    return matchesSearch;
+    const matchesStatus =
+      appliedStatus === "Semua Status" ||
+      item.status.toLowerCase() === appliedStatus.toLowerCase() ||
+      item.paymentStatus.toLowerCase() === appliedStatus.toLowerCase();
+
+    const matchesPackage =
+      appliedPackage === "Semua Paket" ||
+      item.packageName.toLowerCase().includes(appliedPackage.toLowerCase());
+
+    return matchesStatus && matchesPackage;
   });
+
+  // Jamaah: hanya menampilkan pendaftarannya sendiri (pilgrim_id = user.id login).
+  const displayedList = isJamaah
+    ? filteredList.filter((item) => item.pilgrimId === userId)
+    : filteredList;
 
   const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,21 +187,54 @@ export default function PendaftaranPage() {
       return;
     }
 
+    const pkg = packages.find((p) => p.id === selectedPkgId);
+    if (!pkg) {
+      alert("Paket yang dipilih tidak ditemukan di database.");
+      return;
+    }
+
     try {
-      const pkg = packages.find((p) => p.id === selectedPkgId);
       await createBooking({
         pilgrim_id: selectedPilgrimId,
         package_id: selectedPkgId,
-        total_price: pkg?.price || 25000000,
-        status: "pending",
+        booking_date: bookingDate || new Date().toISOString().split("T")[0],
+        departure_date: pkg.departure_date ?? null,
+        total_price: Number(pkg.price) || 0,
+        status: "confirmed",
       });
-      await loadData();
-      setIsAdding(false);
+
+      setIsModalOpen(false);
       setSelectedPilgrimId("");
       setSelectedPkgId("");
-    } catch (err) {
+      await loadData();
+      alert("Pendaftaran jamaah berhasil disimpan ke database.");
+    } catch (err: unknown) {
       console.error("Gagal membuat booking:", err);
-      alert("Gagal menyimpan pendaftaran ke database Supabase.");
+      alert(`Gagal menyimpan booking: ${(err as Error).message}`);
+    }
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editItem) return;
+
+    const payStatusMap: Record<
+      RegistrationItem["paymentStatus"],
+      "completed" | "confirmed" | "pending"
+    > = {
+      Lunas: "completed",
+      Sebagian: "confirmed",
+      "Belum Bayar": "pending",
+    };
+
+    try {
+      await updateBooking(editItem.id, { status: payStatusMap[editItem.paymentStatus] });
+      setEditItem(null);
+      await loadData();
+      alert("Perubahan pendaftaran berhasil disimpan.");
+    } catch (err: unknown) {
+      console.error("Gagal memperbarui pendaftaran:", err);
+      alert(`Gagal menyimpan perubahan: ${(err as Error).message}`);
     }
   };
 
@@ -150,67 +243,231 @@ export default function PendaftaranPage() {
       try {
         await deleteBooking(id);
         await loadData();
-      } catch (err) {
+        alert("Pendaftaran berhasil dihapus.");
+      } catch (err: unknown) {
         console.error("Gagal menghapus pendaftaran:", err);
+        alert(`Gagal menghapus pendaftaran: ${(err as Error).message}`);
       }
     }
   };
 
-  // If in Add Mode, show EXACT form from Screenshot 4
-  if (isAdding) {
-    return (
-      <div className="space-y-6 pb-16">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span>Beranda</span>
-          <span>/</span>
-          <button
-            onClick={() => setIsAdding(false)}
-            className="hover:text-slate-600 transition"
-          >
-            Pendaftaran
-          </button>
-          <span>/</span>
-          <span className="text-slate-700 font-semibold">Booking Baru</span>
+  return (
+    <div className="p-6 md:p-8 space-y-6">
+      {/* Header section */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+            <span>Beranda</span>
+            <span>&gt;</span>
+            <span className="text-gray-900 font-medium">Pendaftaran</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900">Pendaftaran</h1>
+          <p className="text-sm text-gray-500">Booking jamaah ke paket Umroh &amp; Haji</p>
         </div>
 
-        {/* Title */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsAdding(false)}
-            className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+        {/* Primary Button */}
+        {!isJamaah && (
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Booking Jamaah Baru
-            </h1>
-            <p className="text-xs text-slate-400">
-              Daftarkan jamaah ke paket Umroh atau Haji dengan validasi kuota otomatis.
-            </p>
+            <Link
+              href="/pendaftaran/daftar"
+              className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 rounded-lg transition shadow-sm cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Daftarkan Jamaah</span>
+            </Link>
           </div>
+        )}
+      </div>
+
+      {/* Filter Bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Dropdown Status */}
+        <div className="relative">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-9 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm min-w-[150px]"
+          >
+            <option>Semua Status</option>
+            <option>Dikonfirmasi</option>
+            <option>Pending</option>
+            <option>Lunas</option>
+            <option>Sebagian</option>
+            <option>Belum Bayar</option>
+          </select>
+          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Two-Column Form Layout matching Screenshot 4 */}
-        <form onSubmit={handleCreateBooking} className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs">
-          {/* Left Column: Form Fields */}
-          <div className="lg:col-span-8 rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm space-y-4">
-            <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-              <span>Informasi Calon Jamaah &amp; Paket</span>
-            </h3>
+        {/* Dropdown Paket */}
+        <div className="relative">
+          <select
+            value={packageFilter}
+            onChange={(e) => setPackageFilter(e.target.value)}
+            className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-9 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm min-w-[160px]"
+          >
+            <option>Semua Paket</option>
+            {packages.map((pkg) => (
+              <option key={pkg.id} value={pkg.name}>
+                {pkg.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+        </div>
 
-            {/* Pilih Jamaah */}
-            <div>
-              <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                PILIH JAMAAH <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
+        {/* Tombol Filter */}
+        <button
+          onClick={handleApplyFilter}
+          className="inline-flex items-center gap-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm"
+        >
+          <Filter className="h-4 w-4 text-gray-500" />
+          <span>Filter</span>
+        </button>
+      </div>
+
+      {/* Tabel */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KODE
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JAMAAH
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PAKET
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  STATUS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  BAYAR
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  TGL DAFTAR
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {displayedList.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Kode */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.code}
+                  </td>
+
+                  {/* Jamaah */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.jamaahName}
+                  </td>
+
+                  {/* Paket */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.packageName}
+                  </td>
+
+                  {/* Status */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                      {item.status}
+                    </span>
+                  </td>
+
+                  {/* Bayar */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {item.paymentStatus === "Lunas" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        Lunas
+                      </span>
+                    )}
+                    {item.paymentStatus === "Sebagian" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                        Sebagian
+                      </span>
+                    )}
+                    {item.paymentStatus === "Belum Bayar" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        Belum Bayar
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Tgl Daftar */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    {item.registrationDate}
+                  </td>
+
+                  {/* Aksi */}
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    {isJamaah ? (
+                      <Link
+                        href={`/pendaftaran/${item.id}`}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                      >
+                        Detail
+                      </Link>
+                    ) : (
+                      <div className="inline-flex items-center gap-3">
+                        <Link
+                          href={`/pendaftaran/${item.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>Detail</span>
+                        </Link>
+                        <Link
+                          href={`/pendaftaran/edit/${item.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium transition"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal Daftarkan Jamaah */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Daftarkan Jamaah Baru</h3>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateBooking} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Pilih Jamaah <span className="text-red-500">*</span>
+                </label>
                 <select
                   value={selectedPilgrimId}
                   onChange={(e) => setSelectedPilgrimId(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                   required
                 >
                   <option value="">-- Pilih Jamaah Terdaftar --</option>
@@ -219,21 +476,22 @@ export default function PendaftaranPage() {
                       {p.name} ({p.phone || "-"})
                     </option>
                   ))}
+                  {pilgrims.length === 0 && (
+                    <option value="" disabled>
+                      Belum ada jamaah terdaftar di database
+                    </option>
+                  )}
                 </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
               </div>
-            </div>
 
-            {/* Pilih Paket */}
-            <div>
-              <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                PILIH PAKET UMROH / HAJI <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Pilih Paket Keberangkatan <span className="text-red-500">*</span>
+                </label>
                 <select
                   value={selectedPkgId}
                   onChange={(e) => setSelectedPkgId(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                   required
                 >
                   <option value="">-- Pilih Paket Keberangkatan --</option>
@@ -242,287 +500,191 @@ export default function PendaftaranPage() {
                       {pkg.name} - Rp {Number(pkg.price).toLocaleString("id-ID")}
                     </option>
                   ))}
+                  {packages.length === 0 && (
+                    <option value="" disabled>
+                      Belum ada paket terdaftar di database
+                    </option>
+                  )}
                 </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Pembimbing & Tanggal Booking */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  PEMBIMBING / MUTHAWIF (OPSIONAL)
-                </label>
-                <div className="relative">
-                  <select
-                    value={selectedMuthawif}
-                    onChange={(e) => setSelectedMuthawif(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
-                  >
-                    <option value="">-- Tanpa Pembimbing Khusus --</option>
-                    {guides.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-                </div>
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  TANGGAL BOOKING <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="date"
-                    value={bookingDate}
-                    onChange={(e) => setBookingDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-9"
-                  />
-                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                </div>
+                <label className="block font-medium text-gray-700 mb-1">Tanggal Booking</label>
+                <input
+                  type="date"
+                  value={bookingDate}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Simpan Booking
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detail */}
+      {detailItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Detail Pendaftaran</h3>
+              <button
+                onClick={() => setDetailItem(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-3 text-sm">
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-gray-500">Kode Booking</span>
+                <span className="font-semibold text-gray-900">{detailItem.code}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-gray-500">Nama Jamaah</span>
+                <span className="font-medium text-gray-900">{detailItem.jamaahName}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-gray-500">Paket</span>
+                <span className="font-medium text-gray-900">{detailItem.packageName}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-gray-500">Status Booking</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                  {detailItem.status}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-gray-500">Status Pembayaran</span>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                    detailItem.paymentStatus === "Lunas"
+                      ? "bg-green-100 text-green-700"
+                      : detailItem.paymentStatus === "Sebagian"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {detailItem.paymentStatus}
+                </span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-gray-500">Tanggal Pendaftaran</span>
+                <span className="text-gray-700">{detailItem.registrationDate}</span>
               </div>
             </div>
-
-            {/* Catatan Tambahan */}
-            <div>
-              <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                CATATAN TAMBAHAN / PERMINTAAN KHUSUS
-              </label>
-              <textarea
-                rows={3}
-                value={specialNotes}
-                onChange={(e) => setSpecialNotes(e.target.value)}
-                placeholder="Contoh: Permintaan satu kamar dengan keluarga, riwayat kursi roda, dsb."
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-y"
-              />
-            </div>
-          </div>
-
-          {/* Right Column: Ringkasan Booking Card */}
-          <div className="lg:col-span-4 rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between space-y-4">
-            <div className="space-y-3">
-              <h3 className="font-bold text-xs text-slate-900 border-b border-slate-100 pb-2.5 tracking-wider uppercase">
-                RINGKASAN BOOKING
-              </h3>
-
-              {chosenPackage ? (
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 space-y-2">
-                  <p className="font-bold text-slate-900 text-sm">{chosenPackage.name}</p>
-                  <p className="text-xl font-extrabold text-emerald-800">
-                    Rp {Number(chosenPackage.price).toLocaleString("id-ID")}
-                  </p>
-                  <div className="space-y-1 text-slate-600 text-[11px] pt-2 border-t border-emerald-100">
-                    <p>Kuota: <strong>{chosenPackage.quota} Kursi</strong></p>
-                    <p>Durasi: <strong>{chosenPackage.duration_days} Hari</strong></p>
-                    <p>Tipe: <strong>{chosenPackage.type.toUpperCase()}</strong></p>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-slate-400 text-xs">
-                  Pilih paket untuk melihat detail harga, kuota, dan jadwal keberangkatan.
-                </div>
-              )}
-            </div>
-
-            {/* Buttons */}
-            <div className="space-y-2 pt-4 border-t border-slate-100">
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
               <button
-                type="submit"
-                className="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 text-xs font-semibold shadow-sm transition active:scale-95"
+                onClick={() => setDetailItem(null)}
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition"
               >
-                Daftarkan Jamaah Sekarang
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="w-full text-center py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 transition"
-              >
-                &larr; Batal
+                Tutup
               </button>
             </div>
           </div>
-        </form>
-      </div>
-    );
-  }
-
-  // Default: Table view
-  return (
-    <div className="space-y-6 pb-12">
-      {/* Header section */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-          Pendaftaran
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          Booking jamaah ke paket Umroh &amp; Haji, pantau status pendaftaran, dan sisa kuota kursi.
-        </p>
-      </div>
-
-      {/* Filter / Search Bar */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Cari kode booking atau nama jamaah..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
-          />
         </div>
+      )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Status Dropdown */}
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="appearance-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 pr-8 focus:outline-none"
-            >
-              <option>Semua Status</option>
-              <option>Pending</option>
-              <option>Dikonfirmasi</option>
-              <option>Batal</option>
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+      {/* Modal Edit */}
+      {editItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Edit Pendaftaran</h3>
+              <button
+                onClick={() => setEditItem(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Kode Booking</label>
+                <input
+                  type="text"
+                  disabled
+                  value={editItem.code}
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Nama Jamaah</label>
+                <input
+                  type="text"
+                  value={editItem.jamaahName}
+                  onChange={(e) =>
+                    setEditItem({ ...editItem, jamaahName: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Paket</label>
+                <input
+                  type="text"
+                  value={editItem.packageName}
+                  onChange={(e) =>
+                    setEditItem({ ...editItem, packageName: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Status Pembayaran</label>
+                <select
+                  value={editItem.paymentStatus}
+                  onChange={(e) =>
+                    setEditItem({
+                      ...editItem,
+                      paymentStatus: e.target.value as "Lunas" | "Sebagian" | "Belum Bayar",
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="Belum Bayar">Belum Bayar</option>
+                  <option value="Sebagian">Sebagian</option>
+                  <option value="Lunas">Lunas</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditItem(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
           </div>
-
-          {/* Package Dropdown */}
-          <div className="relative">
-            <select
-              value={packageFilter}
-              onChange={(e) => setPackageFilter(e.target.value)}
-              className="appearance-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 pr-8 focus:outline-none"
-            >
-              <option>Semua Paket</option>
-              <option>Umroh Reguler Syawal 1447H</option>
-              <option>Umroh Ramadhan Berkah</option>
-              <option>Haji Khusus Furoda</option>
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
-
-          {/* Filter button */}
-          <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 text-xs font-medium transition">
-            <Filter className="h-3.5 w-3.5 text-slate-500" />
-            <span>Filter</span>
-          </button>
-
-          {/* Daftarkan Jamaah button */}
-          <button
-            onClick={() => setIsAdding(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition active:scale-95"
-          >
-            <UserPlus className="h-3.5 w-3.5" />
-            <span>Daftarkan Jamaah</span>
-          </button>
         </div>
-      </div>
-
-      {/* Table Data */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                <th className="pb-3.5 font-bold">KODE</th>
-                <th className="pb-3.5 font-bold">JAMAAH</th>
-                <th className="pb-3.5 font-bold">PAKET</th>
-                <th className="pb-3.5 font-bold">STATUS</th>
-                <th className="pb-3.5 font-bold">BAYAR</th>
-                <th className="pb-3.5 font-bold">TGL DAFTAR</th>
-                <th className="pb-3.5 font-bold text-center">AKSI</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredList.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                  {/* Kode */}
-                  <td className="py-3.5 pr-4">
-                    <span className="font-semibold text-emerald-700 font-mono hover:underline cursor-pointer">
-                      {item.code}
-                    </span>
-                  </td>
-
-                  {/* Jamaah */}
-                  <td className="py-3.5 pr-4">
-                    <p className="font-semibold text-slate-900">{item.jamaahName}</p>
-                    <p className="font-mono text-[11px] text-slate-400 mt-0.5">
-                      {item.jamaahPhone}
-                    </p>
-                  </td>
-
-                  {/* Paket */}
-                  <td className="py-3.5 pr-4">
-                    <p className="font-medium text-slate-800">{item.packageName}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {item.packagePrice}
-                    </p>
-                  </td>
-
-                  {/* Status */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${
-                        item.status === "Pending"
-                          ? "bg-amber-50 text-amber-700 border-amber-200/60"
-                          : "bg-blue-50 text-blue-700 border-blue-200/60"
-                      }`}
-                    >
-                      {item.status}
-                    </span>
-                  </td>
-
-                  {/* Bayar */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${
-                        item.paymentStatus === "Belum Bayar"
-                          ? "bg-red-50 text-red-600 border-red-200/60"
-                          : item.paymentStatus === "Sebagian"
-                          ? "bg-amber-50 text-amber-700 border-amber-200/60"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200/60"
-                      }`}
-                    >
-                      {item.paymentStatus}
-                    </span>
-                  </td>
-
-                  {/* Tgl Daftar */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 text-slate-600">
-                      <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                      {item.registrationDate}
-                    </span>
-                  </td>
-
-                  {/* Aksi */}
-                  <td className="py-3.5 text-center whitespace-nowrap">
-                    <div className="inline-flex items-center gap-2">
-                      <button className="inline-flex items-center gap-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 text-[11px] font-medium transition">
-                        <Eye className="h-3 w-3 text-slate-500" />
-                        <span>Detail</span>
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="inline-flex items-center gap-1 rounded bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1 text-[11px] font-medium transition"
-                      >
-                        <Trash2 className="h-3 w-3 text-red-500" />
-                        <span>Hapus</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

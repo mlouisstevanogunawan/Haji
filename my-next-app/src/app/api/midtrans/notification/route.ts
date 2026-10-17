@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyMidtransNotificationSignature, getMidtransConfig } from "@/lib/midtrans/server";
 import { getMidtransAmount } from "@/lib/midtrans/config";
 import { MidtransNotificationPayload, InvoiceStatus } from "@/lib/midtrans/types";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     //    (sudah dinormalisasi via getMidtransAmount untuk sandbox) DIJUMLAHKAN ke
     //    paid_amount yang sudah ada, lalu status dihitung ulang dari sisa tagihan.
     try {
-      const supabase = createClient();
+      const supabase = createAdminClient();
       const rawInvoiceNum = order_id.split("-TX")[0].split("-timestamp-")[0];
 
       // Ambil invoice terkait sebelum update agar bisa mengakumulasi paid_amount

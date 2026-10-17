@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/client";
+import { dbRead, dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type CommissionRow = Database["public"]["Tables"]["commissions"]["Row"];
@@ -29,70 +29,38 @@ export type CommissionWithDetails = CommissionRow & {
   } | null;
 };
 
+const COMMISSION_SELECT = `
+  *,
+  agents:agent_id (id, name, phone, email, commission_rate),
+  bookings:booking_id (
+    id, total_price, status, pilgrim_id,
+    profiles:pilgrim_id (id, full_name),
+    packages:package_id (name)
+  )
+`;
+
 export async function getCommissions(): Promise<CommissionWithDetails[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("commissions")
-    .select(`
-      *,
-      agents:agent_id (id, name, phone, email, commission_rate),
-      bookings:booking_id (
-        id, total_price, status, pilgrim_id,
-        profiles:pilgrim_id (id, full_name),
-        packages:package_id (name)
-      )
-    `)
-    .order("created_at", { ascending: false });
-
-  if (error) {
+  try {
+    const data = await dbRead<CommissionWithDetails>("commissions", {
+      select: COMMISSION_SELECT,
+      order: "created_at",
+      desc: true,
+    });
+    return data;
+  } catch (error: any) {
     console.error("Error fetching commissions from Supabase:", error.message);
-    throw new Error(error.message);
+    throw error;
   }
-
-  return (data as unknown as CommissionWithDetails[]) || [];
 }
 
 export async function createCommission(payload: CommissionInsert): Promise<CommissionRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("commissions")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating commission:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<CommissionRow>("commissions", { ...payload });
 }
 
 export async function updateCommission(id: string, payload: CommissionUpdate): Promise<CommissionRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("commissions")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating commission:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<CommissionRow>("commissions", id, { ...payload });
 }
 
 export async function deleteCommission(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("commissions").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting commission:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("commissions", id);
 }

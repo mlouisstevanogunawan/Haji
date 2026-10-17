@@ -1,0 +1,273 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createAgent } from "@/services/agentService";
+import { getBranches, BranchRecord } from "@/services/branchService";
+
+export default function TambahAgenPage() {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [branches, setBranches] = React.useState<BranchRecord[]>([]);
+  const [notice, setNotice] = React.useState<
+    { kind: "error" | "success"; text: string } | null
+  >(null);
+
+  // Form Fields - Data Agen
+  const [branch, setBranch] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [phone, setPhone] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [commission, setCommission] = React.useState("0.00");
+  const [isActive, setIsActive] = React.useState(true);
+  const [address, setAddress] = React.useState("");
+
+  // Form Fields - Akun Login
+  const [createLoginAccount, setCreateLoginAccount] = React.useState(false);
+
+  const showToast = (kind: "error" | "success", text: string) => {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 4500);
+  };
+
+  React.useEffect(() => {
+    async function loadBranches() {
+      try {
+        const data = await getBranches();
+        if (data && data.length > 0) {
+          setBranches(data);
+        }
+      } catch (err) {
+        console.error("Gagal memuat cabang:", err);
+      }
+    }
+    loadBranches();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      showToast("error", "Nama Agen wajib diisi!");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const parsedRate = parseFloat(commission);
+      const commissionRate = isNaN(parsedRate) ? 0 : parsedRate / 100;
+
+      await createAgent({
+        name: name.trim(),
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        commission_rate: commissionRate,
+        city: address.trim() || null,
+        branch_id: branch || null,
+        is_active: isActive,
+      });
+
+      showToast("success", "Agen baru berhasil disimpan ke database.");
+      setTimeout(() => router.push("/agen"), 700);
+    } catch (err: unknown) {
+      console.error("Gagal menambahkan agen:", err);
+      showToast(
+        "error",
+        `Gagal menyimpan ke Supabase: ${(err as Error).message}`
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="p-6 md:p-8 space-y-6 max-w-2xl">
+      {/* Header section with Breadcrumb */}
+      <div>
+        <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+          <Link href="/dashboard" className="hover:text-gray-900 transition">
+            Beranda
+          </Link>
+          <span>&gt;</span>
+          <Link href="/agen" className="hover:text-gray-900 transition">
+            Agen
+          </Link>
+          <span>&gt;</span>
+          <span className="text-gray-900 font-medium">Tambah</span>
+        </nav>
+        <h1 className="text-2xl font-bold text-gray-900">Tambah Agen</h1>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {notice && (
+          <div
+            role="status"
+            className={`rounded-lg border px-4 py-3 text-sm ${
+              notice.kind === "error"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-green-200 bg-green-50 text-green-700"
+            }`}
+          >
+            {notice.text}
+          </div>
+        )}
+        {/* Card 1: Data Agen */}
+        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3">
+            Data Agen
+          </h2>
+
+          {/* Cabang */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cabang
+            </label>
+            <select
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm"
+            >
+              <option value="">— Tanpa Cabang —</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Nama */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Nama <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="Contoh: Hasan Basri"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm"
+            />
+          </div>
+
+          {/* Telepon / WhatsApp & Email */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Telepon/WhatsApp
+              </label>
+              <input
+                type="text"
+                placeholder="Contoh: 0811-1234-5678"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                placeholder="Contoh: agen@domain.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm"
+              />
+            </div>
+          </div>
+
+          {/* Komisi (%) & Checkbox Aktif */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Komisi (%)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={commission}
+                onChange={(e) => setCommission(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-6">
+              <input
+                type="checkbox"
+                id="isActive"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+              />
+              <label
+                htmlFor="isActive"
+                className="text-sm font-medium text-gray-700 cursor-pointer select-none"
+              >
+                Aktif
+              </label>
+            </div>
+          </div>
+
+          {/* Alamat */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Alamat
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Alamat lengkap domisili agen..."
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-teal-500 shadow-sm resize-y"
+            />
+          </div>
+        </div>
+
+        {/* Card 2: Akun Login */}
+        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3">
+            Akun Login
+          </h2>
+
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="createLoginAccount"
+              checked={createLoginAccount}
+              onChange={(e) => setCreateLoginAccount(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+            />
+            <label
+              htmlFor="createLoginAccount"
+              className="text-sm font-medium text-gray-700 cursor-pointer select-none"
+            >
+              Buatkan akun login
+            </label>
+          </div>
+        </div>
+
+        {/* Tombol Simpan & Batal */}
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 transition shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            {isSubmitting ? "Menyimpan..." : "Simpan"}
+          </button>
+          <Link
+            href="/agen"
+            className="rounded-lg bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium text-sm px-4 py-2 transition shadow-sm inline-flex items-center justify-center"
+          >
+            Batal
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}

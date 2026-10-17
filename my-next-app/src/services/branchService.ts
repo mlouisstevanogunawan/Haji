@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 
 export interface BranchRecord {
   id: string;
@@ -30,46 +31,13 @@ export async function getBranches(): Promise<BranchRecord[]> {
 }
 
 export async function createBranch(payload: Partial<BranchRecord>): Promise<BranchRecord> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("branches")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating branch:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<BranchRecord>("branches", { ...payload });
 }
 
 export async function updateBranch(id: string, payload: Partial<BranchRecord>): Promise<BranchRecord> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("branches")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating branch:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<BranchRecord>("branches", id, { ...payload });
 }
 
 export async function deleteBranch(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("branches").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting branch:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("branches", id);
 }

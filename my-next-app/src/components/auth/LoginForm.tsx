@@ -4,25 +4,36 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, KeyRound, ShieldCheck } from "lucide-react";
 import { z } from "zod";
-import { DemoAccountSelector, DEMO_ACCOUNTS, DemoAccount } from "./DemoAccountSelector";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { createClient } from "@/lib/supabase/client";
+import type { SessionUser } from "@/lib/auth/roles";
 
 const loginSchema = z.object({
-  email: z.string().email("Format email tidak valid").min(1, "Email wajib diisi"),
+  email: z.string().min(1, "Email wajib diisi").email("Format email tidak valid"),
   password: z.string().min(1, "Password wajib diisi"),
   rememberMe: z.boolean().optional(),
 });
 
-export const LoginForm: React.FC = () => {
+function safeRedirectTarget(value?: string | null): string | null {
+  if (!value) return null;
+  // Hanya path internal; hindari open redirect ke domain lain.
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
+interface LoginFormProps {
+  redirectTo?: string | null;
+}
+
+export const LoginForm: React.FC<LoginFormProps> = ({ redirectTo }) => {
   const router = useRouter();
 
-  // Form State initialized with Super Admin demo values
-  const [email, setEmail] = React.useState("admin@travel.com");
-  const [password, setPassword] = React.useState("password");
-  const [rememberMe, setRememberMe] = React.useState(true);
-  const [selectedDemoId, setSelectedDemoId] = React.useState<string | null>("super_admin");
+  // Form State
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [rememberMe, setRememberMe] = React.useState(false);
 
   const [showPassword, setShowPassword] = React.useState(false);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
@@ -32,15 +43,8 @@ export const LoginForm: React.FC = () => {
   // Forgot Password Modal State
   const [isForgotModalOpen, setIsForgotModalOpen] = React.useState(false);
   const [forgotEmail, setForgotEmail] = React.useState("");
+  const [forgotError, setForgotError] = React.useState<string | null>(null);
   const [forgotSuccess, setForgotSuccess] = React.useState(false);
-
-  const handleDemoSelect = (account: DemoAccount) => {
-    setSelectedDemoId(account.id);
-    setEmail(account.email);
-    setPassword("password");
-    setErrors({});
-    setErrorMessage(null);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,45 +66,90 @@ export const LoginForm: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // Set session cookie for middleware authentication
-      document.cookie = "umroh_admin_session=authenticated; path=/; max-age=86400; SameSite=Lax";
-      
-      // Smooth redirect to dashboard
-      setTimeout(() => {
-        router.push("/dashboard");
-        router.refresh();
-      }, 500);
-    } catch {
-      setErrorMessage("Terjadi gangguan koneksi. Silakan coba lagi.");
+      const supabase = createClient();
+      const cleanEmail = email.trim().toLowerCase();
+
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+      if (signInError || !data.user) {
+        const raw = signInError?.message || "";
+        setErrorMessage(
+          /invalid login credentials/i.test(raw)
+            ? "Email atau kata sandi tidak valid. Silakan coba lagi."
+            : raw || "Login gagal. Pastikan email dan kata sandi benar."
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Token sesi sudah ditulis @supabase/ssr ke cookie; ambil peran aslinya
+      // dari tabel profiles lewat endpoint sesi (divalidasi server).
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const payload = (await res.json().catch(() => null)) as {
+        user?: SessionUser;
+      } | null;
+
+      if (!res.ok || !payload?.user) {
+        // Sesi ada tapi profil/peran tidak terbaca: logout agar tidak nyangkut.
+        await supabase.auth.signOut();
+        setErrorMessage(
+          "Akun ini belum memiliki data profil di sistem. Hubungi admin cabang untuk aktivasi akun."
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      const target = safeRedirectTarget(redirectTo) || payload.user.homePath;
+      router.push(target);
+      router.refresh();
+    } catch (err) {
+      console.error("Login unexpected error:", err);
+      setErrorMessage("Terjadi gangguan koneksi ke server. Silakan coba lagi.");
       setIsLoading(false);
     }
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
+  const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail) return;
-    setForgotSuccess(true);
-    setTimeout(() => {
-      setForgotSuccess(false);
-      setIsForgotModalOpen(false);
-      setForgotEmail("");
-    }, 2000);
+    setForgotError(null);
+    setIsLoading(false);
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        forgotEmail.trim().toLowerCase(),
+        { redirectTo: `${window.location.origin}/auth/callback?next=/login` }
+      );
+      if (error) {
+        setForgotError(error.message);
+        return;
+      }
+      setForgotSuccess(true);
+      setTimeout(() => {
+        setForgotSuccess(false);
+        setIsForgotModalOpen(false);
+        setForgotEmail("");
+      }, 3500);
+    } catch {
+      setForgotError("Gagal mengirim email reset. Coba beberapa saat lagi.");
+    }
   };
 
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-4">
         {errorMessage && (
-          <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700 border border-red-200">
+          <div
+            role="alert"
+            className="rounded-xl bg-red-50 p-3 text-xs font-medium text-red-700 border border-red-200"
+          >
             {errorMessage}
           </div>
         )}
-
-        {/* Demo Account Selector Chips */}
-        <DemoAccountSelector
-          selectedId={selectedDemoId}
-          onSelect={handleDemoSelect}
-        />
 
         {/* Email Input */}
         <div className="space-y-1.5">
@@ -116,11 +165,11 @@ export const LoginForm: React.FC = () => {
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
-                setSelectedDemoId(null);
                 if (errors.email) setErrors({ ...errors, email: "" });
               }}
-              placeholder="nama@travel.com"
-              className={`w-full rounded-lg border bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-600 transition ${
+              placeholder="Email"
+              autoComplete="username"
+              className={`w-full rounded-xl border bg-slate-50/70 py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0d9488] focus:bg-white focus:border-transparent transition ${
                 errors.email ? "border-red-500" : "border-slate-200"
               }`}
             />
@@ -139,7 +188,7 @@ export const LoginForm: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsForgotModalOpen(true)}
-              className="text-xs text-emerald-600 font-medium hover:underline hover:text-emerald-700"
+              className="text-xs text-[#0d9488] font-medium hover:underline hover:text-teal-700 transition"
             >
               Lupa password?
             </button>
@@ -155,8 +204,9 @@ export const LoginForm: React.FC = () => {
                 setPassword(e.target.value);
                 if (errors.password) setErrors({ ...errors, password: "" });
               }}
-              placeholder="••••••••"
-              className={`w-full rounded-lg border bg-white py-2.5 pl-9 pr-10 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-600 transition ${
+              placeholder="Password"
+              autoComplete="current-password"
+              className={`w-full rounded-xl border bg-slate-50/70 py-2.5 pl-9 pr-10 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0d9488] focus:bg-white focus:border-transparent transition ${
                 errors.password ? "border-red-500" : "border-slate-200"
               }`}
             />
@@ -181,7 +231,7 @@ export const LoginForm: React.FC = () => {
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
+              className="h-4 w-4 rounded border-slate-300 text-[#0d9488] focus:ring-[#0d9488] accent-[#0d9488]"
             />
             <span className="text-xs text-slate-600 font-normal">
               Ingat saya di perangkat ini
@@ -194,7 +244,7 @@ export const LoginForm: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full flex items-center justify-center bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition duration-200 shadow-sm disabled:opacity-70"
+            className="w-full flex items-center justify-center bg-[#0d9488] hover:bg-[#0f766e] text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition duration-200 shadow-md shadow-teal-700/20 disabled:opacity-70"
           >
             {isLoading ? "Memproses..." : "Masuk"}
           </button>
@@ -203,8 +253,8 @@ export const LoginForm: React.FC = () => {
         {/* Bottom Help Notice */}
         <div className="mt-6 rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 text-center">
           <p className="text-xs text-slate-500 leading-relaxed">
-            Belum punya akun? Akun jamaah, agen, dan muthawif dibuat oleh staf kantor.
-            Silakan hubungi admin cabang Anda untuk mendapatkan akses.
+            Belum punya akun? Akun jamaah, agen, dan muthawif dibuat oleh staf
+            kantor. Silakan hubungi admin cabang Anda untuk mendapatkan akses.
           </p>
         </div>
       </form>
@@ -218,17 +268,25 @@ export const LoginForm: React.FC = () => {
         maxWidth="md"
       >
         {forgotSuccess ? (
-          <div className="rounded-xl bg-emerald-50 p-4 text-center border border-emerald-200 space-y-2">
-            <ShieldCheck className="h-10 w-10 text-emerald-600 mx-auto" />
-            <p className="text-sm font-bold text-emerald-900">
+          <div className="rounded-xl bg-teal-50 p-4 text-center border border-teal-200 space-y-2">
+            <ShieldCheck className="h-10 w-10 text-[#0d9488] mx-auto" />
+            <p className="text-sm font-bold text-teal-900">
               Tautan Reset Terkirim!
             </p>
-            <p className="text-xs text-emerald-700">
+            <p className="text-xs text-teal-700">
               Silakan periksa kotak masuk atau spam email Anda.
             </p>
           </div>
         ) : (
           <form onSubmit={handleForgotSubmit} className="space-y-4 pt-2">
+            {forgotError && (
+              <div
+                role="alert"
+                className="rounded-xl bg-red-50 p-3 text-xs font-medium text-red-700 border border-red-200"
+              >
+                {forgotError}
+              </div>
+            )}
             <Input
               label="Email Terdaftar"
               type="email"

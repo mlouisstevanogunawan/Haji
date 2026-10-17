@@ -4,119 +4,107 @@ export const MosqueIllustration: React.FC<{ className?: string }> = ({ className
   return (
     <div className={`pointer-events-none select-none overflow-hidden ${className}`}>
       <svg
-        viewBox="0 0 1000 450"
+        viewBox="0 0 1000 480"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        className="w-full h-auto drop-shadow-2xl"
+        className="w-full h-auto"
         preserveAspectRatio="xMidYMax meet"
       >
         <defs>
-          {/* Subtle Mosque Gradients matching Emerald Tone */}
-          <linearGradient id="domeGradPrimary" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#34d399" stopOpacity="0.32" />
-            <stop offset="100%" stopColor="#059669" stopOpacity="0.15" />
+          <linearGradient id="mosqueMainGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#08544c" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#064841" stopOpacity="0.95" />
           </linearGradient>
 
-          <linearGradient id="domeGradSecondary" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#6ee7b7" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#047857" stopOpacity="0.10" />
+          <linearGradient id="mosqueBackGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#0a645b" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#075148" stopOpacity="0.7" />
           </linearGradient>
 
-          <linearGradient id="towerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#a7f3d0" stopOpacity="0.28" />
-            <stop offset="50%" stopColor="#34d399" stopOpacity="0.20" />
-            <stop offset="100%" stopColor="#065f46" stopOpacity="0.15" />
+          <linearGradient id="mosqueAccentGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#0d786d" stopOpacity="0.6" />
+            <stop offset="100%" stopColor="#08544c" stopOpacity="0.4" />
           </linearGradient>
         </defs>
 
-        {/* Back Ground Domes (Soft Layer) */}
+        {/* Background Soft Secondary Domes */}
         <path
-          d="M180 450 C180 320 230 260 280 260 C330 260 380 320 380 450 Z"
-          fill="url(#domeGradSecondary)"
+          d="M200 480 C200 340 250 280 300 280 C350 280 400 340 400 480 Z"
+          fill="url(#mosqueBackGrad)"
         />
         <path
-          d="M620 450 C620 320 670 260 720 260 C770 260 820 320 820 450 Z"
-          fill="url(#domeGradSecondary)"
-        />
-
-        {/* Central Grand Dome */}
-        {/* Dome Finial / Crescent Spike */}
-        <path d="M500 90 L500 130" stroke="#a7f3d0" strokeWidth="4" strokeLinecap="round" />
-        <circle cx="500" cy="85" r="5" fill="#a7f3d0" />
-        <path
-          d="M500 80 C504 77 508 77 509 82 C510 87 505 91 500 92 C506 91 509 85 507 81 Z"
-          fill="#a7f3d0"
+          d="M600 480 C600 340 650 280 700 280 C750 280 800 340 800 480 Z"
+          fill="url(#mosqueBackGrad)"
         />
 
-        {/* Grand Dome Body (Classic pointed onion shape) */}
+        {/* Central Grand Onion Dome */}
+        {/* Crescent Finial */}
+        <path d="M500 110 L500 155" stroke="#0a6960" strokeWidth="4" strokeLinecap="round" />
+        <circle cx="500" cy="105" r="5" fill="#0a6960" />
         <path
-          d="M500 130 
-             C470 180 350 210 350 330 
-             C350 380 370 450 370 450 
-             L630 450 
-             C630 450 650 380 650 330 
-             C650 210 530 180 500 130 Z"
-          fill="url(#domeGradPrimary)"
+          d="M500 98 C505 95 510 95 511 100 C512 105 507 109 500 110 C507 109 510 103 508 99 Z"
+          fill="#0a6960"
         />
 
-        {/* Arched windows on Grand Dome */}
+        {/* Grand Dome Body */}
         <path
-          d="M475 360 C475 340 485 330 500 330 C515 330 525 340 525 360 L525 410 L475 410 Z"
-          fill="rgba(4, 120, 87, 0.4)"
+          d="M500 155 
+             C470 200 340 230 340 350 
+             C340 400 365 480 365 480 
+             L635 480 
+             C635 480 660 400 660 350 
+             C660 230 530 200 500 155 Z"
+          fill="url(#mosqueMainGrad)"
+        />
+
+        {/* Arched windows / recessed niches on Grand Dome */}
+        <path
+          d="M480 370 C480 352 488 344 500 344 C512 344 520 352 520 370 L520 440 L480 440 Z"
+          fill="rgba(4, 40, 35, 0.45)"
         />
         <path
-          d="M420 375 C420 360 428 350 440 350 C452 350 460 360 460 375 L460 410 L420 410 Z"
-          fill="rgba(4, 120, 87, 0.35)"
+          d="M425 385 C425 372 432 364 442 364 C452 364 459 372 459 385 L459 440 L425 440 Z"
+          fill="rgba(4, 40, 35, 0.35)"
         />
         <path
-          d="M540 375 C540 360 548 350 560 350 C572 350 580 360 580 375 L580 410 L540 410 Z"
-          fill="rgba(4, 120, 87, 0.35)"
+          d="M541 385 C541 372 548 364 558 364 C568 364 575 372 575 385 L575 440 L541 440 Z"
+          fill="rgba(4, 40, 35, 0.35)"
         />
 
         {/* Left Minaret Tower */}
-        {/* Minaret Spike & Finial */}
-        <path d="M120 120 L120 160" stroke="#a7f3d0" strokeWidth="3" strokeLinecap="round" />
-        <circle cx="120" cy="115" r="4" fill="#a7f3d0" />
+        <path d="M100 140 L100 185" stroke="#0a6960" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="100" cy="135" r="4" fill="#0a6960" />
         <path
-          d="M105 200 L120 160 L135 200 Z"
-          fill="url(#domeGradPrimary)"
+          d="M85 220 L100 185 L115 220 Z"
+          fill="url(#mosqueMainGrad)"
         />
         {/* Upper Balcony */}
-        <rect x="98" y="200" width="44" height="12" rx="2" fill="url(#towerGrad)" />
+        <rect x="80" y="220" width="40" height="10" rx="2" fill="url(#mosqueMainGrad)" />
         {/* Upper Column */}
-        <rect x="106" y="212" width="28" height="70" fill="url(#towerGrad)" />
+        <rect x="87" y="230" width="26" height="70" fill="url(#mosqueMainGrad)" />
         {/* Mid Balcony */}
-        <rect x="94" y="282" width="52" height="14" rx="2" fill="url(#towerGrad)" />
-        {/* Main Pillar */}
-        <rect x="100" y="296" width="40" height="154" fill="url(#towerGrad)" />
-        {/* Minaret Windows */}
-        <rect x="114" y="235" width="12" height="24" rx="6" fill="rgba(4, 120, 87, 0.4)" />
-        <rect x="114" y="330" width="12" height="30" rx="6" fill="rgba(4, 120, 87, 0.4)" />
-        <rect x="114" y="380" width="12" height="30" rx="6" fill="rgba(4, 120, 87, 0.4)" />
+        <rect x="76" y="300" width="48" height="12" rx="2" fill="url(#mosqueMainGrad)" />
+        {/* Main Column */}
+        <rect x="82" y="312" width="36" height="168" fill="url(#mosqueMainGrad)" />
 
         {/* Right Minaret Tower */}
-        {/* Minaret Spike & Finial */}
-        <path d="M880 120 L880 160" stroke="#a7f3d0" strokeWidth="3" strokeLinecap="round" />
-        <circle cx="880" cy="115" r="4" fill="#a7f3d0" />
+        <path d="M900 140 L900 185" stroke="#0a6960" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="900" cy="135" r="4" fill="#0a6960" />
         <path
-          d="M865 200 L880 160 L895 200 Z"
-          fill="url(#domeGradPrimary)"
+          d="M885 220 L900 185 L915 220 Z"
+          fill="url(#mosqueMainGrad)"
         />
         {/* Upper Balcony */}
-        <rect x="858" y="200" width="44" height="12" rx="2" fill="url(#towerGrad)" />
+        <rect x="880" y="220" width="40" height="10" rx="2" fill="url(#mosqueMainGrad)" />
         {/* Upper Column */}
-        <rect x="866" y="212" width="28" height="70" fill="url(#towerGrad)" />
+        <rect x="887" y="230" width="26" height="70" fill="url(#mosqueMainGrad)" />
         {/* Mid Balcony */}
-        <rect x="854" y="282" width="52" height="14" rx="2" fill="url(#towerGrad)" />
-        {/* Main Pillar */}
-        <rect x="860" y="296" width="40" height="154" fill="url(#towerGrad)" />
-        {/* Minaret Windows */}
-        <rect x="874" y="235" width="12" height="24" rx="6" fill="rgba(4, 120, 87, 0.4)" />
-        <rect x="874" y="330" width="12" height="30" rx="6" fill="rgba(4, 120, 87, 0.4)" />
-        <rect x="874" y="380" width="12" height="30" rx="6" fill="rgba(4, 120, 87, 0.4)" />
+        <rect x="876" y="300" width="48" height="12" rx="2" fill="url(#mosqueMainGrad)" />
+        {/* Main Column */}
+        <rect x="882" y="312" width="36" height="168" fill="url(#mosqueMainGrad)" />
 
-        {/* Base Wall & Colonnade */}
-        <rect x="0" y="440" width="1000" height="10" fill="rgba(6, 78, 59, 0.3)" />
+        {/* Base Wall structure */}
+        <rect x="0" y="455" width="1000" height="25" fill="rgba(6, 60, 52, 0.7)" />
       </svg>
     </div>
   );

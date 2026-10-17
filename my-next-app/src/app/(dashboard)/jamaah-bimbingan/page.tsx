@@ -1,494 +1,312 @@
 "use client";
 
 import * as React from "react";
-import {
-  Users,
-  Plus,
-  Search,
-  ChevronDown,
-  Eye,
-  Edit2,
-  Trash2,
-  MessageCircle,
-  AlertTriangle,
-  X,
-  Check,
-} from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, X } from "lucide-react";
+import { getJamaahList, type JamaahProfile } from "@/services/jamaahService";
 
-import {
-  getJamaahList,
-  createJamaah,
-  deleteJamaah,
-  JamaahProfile,
-} from "@/services/jamaahService";
-
-interface JamaahItem {
+interface JamaahBimbinganItem {
   id: string;
-  name: string;
-  code: string;
-  gender: "Laki-laki" | "Perempuan";
+  kode: string;
+  nama: string;
+  gender: string;
   nik: string;
   phone: string;
+  email: string;
   paspor: string;
-  expDate?: string;
-  isExpSoon?: boolean;
-  branch: string;
-  agent: string;
+  expDate: string;
+  agen: string;
 }
 
-function mapProfileToItem(p: JamaahProfile): JamaahItem {
+function formatPassportExpiry(value?: string): string {
+  if (!value || value === "-") return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return `Exp ${parsed.toLocaleDateString("id-ID", { month: "short", year: "numeric" })}`;
+}
+
+function mapJamaahToItem(j: JamaahProfile): JamaahBimbinganItem {
   return {
-    id: p.id,
-    name: p.name,
-    code: p.code || `PLG-${p.id.slice(0, 6).toUpperCase()}`,
-    gender: p.gender || "Laki-laki",
-    nik: p.nik || "-",
-    phone: p.phone || "-",
-    paspor: p.passportNumber || "-",
-    expDate: p.passportExpiry !== "-" ? `Exp: ${p.passportExpiry}` : undefined,
-    isExpSoon: Boolean(p.isPassportExpiringSoon),
-    branch: p.branch || "Kantor Pusat Jakarta",
-    agent: p.agent || "Bimbingan Muthawif",
+    id: j.id,
+    kode: j.code || "-",
+    nama: j.name,
+    gender: j.gender || "-",
+    nik: j.nik || "-",
+    phone: j.phone || "-",
+    email: j.email || "-",
+    paspor: j.passportNumber || "-",
+    expDate: formatPassportExpiry(j.passportExpiry || undefined),
+    agen: j.agent || "-",
   };
 }
 
 export default function JamaahBimbinganPage() {
-  const [jamaahList, setJamaahList] = React.useState<JamaahItem[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
+
+
+  const [jamaahList, setJamaahList] = React.useState<JamaahBimbinganItem[]>([]);
+  const [isLoading, setIsLoading] = React.useState<boolean>(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [appliedSearch, setAppliedSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("Semua Status");
+  const [appliedStatus, setAppliedStatus] = React.useState("Semua Status");
 
-  // Modal states
-  const [showAddModal, setShowAddModal] = React.useState(false);
-  const [detailItem, setDetailItem] = React.useState<JamaahItem | null>(null);
+  // Modal Detail
+  const [viewingItem, setViewingItem] = React.useState<JamaahBimbinganItem | null>(null);
 
-  // New Jamaah Form
-  const [newName, setNewName] = React.useState("");
-  const [newGender, setNewGender] = React.useState<"Laki-laki" | "Perempuan">("Laki-laki");
-  const [newNik, setNewNik] = React.useState("");
-  const [newPhone, setNewPhone] = React.useState("");
-  const [newPaspor, setNewPaspor] = React.useState("");
-  const [newBranch, setNewBranch] = React.useState("Kantor Pusat Jakarta");
-
-  const loadJamaah = React.useCallback(async () => {
+  const loadData = React.useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const data = await getJamaahList();
-      setJamaahList(data.map(mapProfileToItem));
+      setJamaahList((data || []).map(mapJamaahToItem));
     } catch (err: unknown) {
-      console.error("Gagal memuat jamaah bimbingan:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Gagal memuat data jamaah dari Supabase:", err);
       setJamaahList([]);
+      setLoadError(msg);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
-    loadJamaah();
-  }, [loadJamaah]);
+    loadData();
+  }, [loadData]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAppliedSearch(searchTerm.trim().toLowerCase());
+    setAppliedStatus(statusFilter);
+  };
 
   const filteredData = jamaahList.filter((item) => {
+    const q = appliedSearch;
     const matchesSearch =
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.nik.includes(searchTerm) ||
-      item.paspor.toLowerCase().includes(searchTerm.toLowerCase());
+      !q ||
+      item.nama.toLowerCase().includes(q) ||
+      item.kode.toLowerCase().includes(q) ||
+      item.nik.includes(q) ||
+      item.paspor.toLowerCase().includes(q);
 
-    if (statusFilter === "Paspor Kadaluarsa") {
-      return matchesSearch && item.isExpSoon;
-    }
     return matchesSearch;
   });
 
-  const handleAddJamaah = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName || !newNik) return;
-
-    try {
-      await createJamaah({
-        name: newName.trim(),
-        gender: newGender,
-        nik: newNik.trim(),
-        phone: newPhone.trim() || "-",
-        passportNumber: newPaspor.trim() || "-",
-        passportExpiry: newPaspor ? "Okt 2031" : "-",
-        isPassportExpiringSoon: false,
-        branch: newBranch,
-        agent: "Bimbingan Muthawif",
-      });
-      await loadJamaah();
-      setShowAddModal(false);
-      setNewName("");
-      setNewNik("");
-      setNewPhone("");
-      setNewPaspor("");
-    } catch (err) {
-      console.error("Gagal menambahkan jamaah bimbingan:", err);
-      alert("Gagal menyimpan jamaah ke database Supabase.");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm("Apakah Anda yakin ingin menghapus data jamaah ini?")) {
-      try {
-        await deleteJamaah(id);
-        await loadJamaah();
-      } catch (err) {
-        console.error("Gagal menghapus jamaah:", err);
-      }
-    }
-  };
-
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Data Jamaah
-            </h1>
-            <p className="text-xs text-slate-400">
-              Master database jamaah Umroh &amp; Haji, rekam paspor, dan kontak darurat.
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-sm transition active:scale-95"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Tambah Jamaah</span>
-        </button>
+    <div className="space-y-6">
+      {/* Breadcrumb & Header matching Screenshot 4 */}
+      <div>
+        <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+          <Link href="/dashboard" className="hover:text-gray-900 transition">
+            Beranda
+          </Link>
+          <span>&gt;</span>
+          <span className="text-gray-900 font-medium">Jamaah</span>
+        </nav>
+        <h1 className="text-2xl font-bold text-gray-900">Jamaah</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Daftar jamaah umroh &amp; haji
+        </p>
       </div>
 
-      {/* Filter / Search Bar */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex flex-col sm:flex-row items-center gap-2.5">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+      {/* Filter / Search Bar matching Screenshot 4 */}
+      <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[260px] flex-1 max-w-sm">
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Cari nama jamaah, NIK, nomor paspor, kode..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
+            placeholder="Cari nama / NIK / paspor"
+            className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:flex-none">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full sm:w-40 appearance-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 pr-8 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            >
-              <option>Semua Status</option>
-              <option>Paspor Kadaluarsa</option>
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
-
-          <button className="rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 px-4 py-1.5 text-xs font-semibold transition">
-            Cari
-          </button>
+        <div className="relative">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-9 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition"
+          >
+            <option value="Semua Status">Semua Status</option>
+            <option value="Aktif">Aktif</option>
+            <option value="Selesai">Selesai</option>
+          </select>
+          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
         </div>
-      </div>
 
-      {/* Table Data */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+        <button
+          type="submit"
+          className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium text-sm px-4 py-2 rounded-lg transition shadow-xs cursor-pointer"
+        >
+          Cari
+        </button>
+      </form>
+
+      {/* Tabel Jamaah matching Screenshot 4 */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                <th className="pb-3.5 font-bold">KODE &amp; NAMA JAMAAH</th>
-                <th className="pb-3.5 font-bold">GENDER</th>
-                <th className="pb-3.5 font-bold">NIK (KTP)</th>
-                <th className="pb-3.5 font-bold">KONTAK &amp; WHATSAPP</th>
-                <th className="pb-3.5 font-bold">PASPOR &amp; KADALUARSA</th>
-                <th className="pb-3.5 font-bold">CABANG / AGEN</th>
-                <th className="pb-3.5 font-bold text-center">AKSI</th>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KODE / NAMA
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  GENDER
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  NIK
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KONTAK
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PASPOR
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  AGEN
+                </th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredData.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                  {/* Name & Code */}
-                  <td className="py-3.5 pr-3">
-                    <p className="font-semibold text-slate-900">{item.name}</p>
-                    <p className="font-mono text-[10px] text-slate-400 mt-0.5">
-                      {item.code}
-                    </p>
+            <tbody className="divide-y divide-gray-100">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-400">
+                    Memuat data jamaah dari Supabase...
+                  </td>
+                </tr>
+              ) : filteredData.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-400">
+                    {loadError
+                      ? `Gagal memuat data jamaah dari Supabase: ${loadError}`
+                      : "Belum ada data jamaah tersimpan di Supabase."}
+                  </td>
+                </tr>
+              ) : (
+                filteredData.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Kode & Nama */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <p className="text-sm font-semibold text-gray-900">{item.nama}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.kode}</p>
                   </td>
 
                   {/* Gender */}
-                  <td className="py-3.5 pr-3 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${
-                        item.gender === "Laki-laki"
-                          ? "bg-blue-50 text-blue-600 border-blue-200/60"
-                          : "bg-pink-50 text-pink-600 border-pink-200/60"
-                      }`}
-                    >
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                       {item.gender}
                     </span>
                   </td>
 
                   {/* NIK */}
-                  <td className="py-3.5 pr-3 font-mono text-slate-600 whitespace-nowrap">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
                     {item.nik}
                   </td>
 
-                  {/* Phone & WhatsApp */}
-                  <td className="py-3.5 pr-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5 font-mono text-slate-700">
-                      <span>{item.phone}</span>
-                      <a
-                        href={`https://wa.me/${item.phone.replace(/^0/, "62")}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Chat WhatsApp"
-                        className="text-emerald-500 hover:text-emerald-600 transition"
-                      >
-                        <MessageCircle className="h-3.5 w-3.5 fill-emerald-100" />
-                      </a>
-                    </div>
+                  {/* Kontak */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <p className="text-sm text-teal-700 font-medium">{item.phone}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.email}</p>
                   </td>
 
-                  {/* Passport & Exp */}
-                  <td className="py-3.5 pr-3">
-                    <p className="font-medium text-slate-800">{item.paspor}</p>
-                    {item.expDate && (
-                      <div className="mt-0.5">
-                        {item.isExpSoon ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-red-50 text-red-600 border border-red-200/70 px-1.5 py-0.5 text-[10px] font-semibold">
-                            <AlertTriangle className="h-2.5 w-2.5 text-red-500" />
-                            {item.expDate}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-slate-400">
-                            {item.expDate}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                  {/* Paspor */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <p className="text-sm text-gray-800">{item.paspor}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.expDate}</p>
                   </td>
 
-                  {/* Branch & Agent */}
-                  <td className="py-3.5 pr-3">
-                    <p className="text-slate-800 font-medium">{item.branch}</p>
-                    <p className="text-[10px] text-slate-400">{item.agent}</p>
+                  {/* Agen */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.agen}
                   </td>
 
-                  {/* Action Icons */}
-                  <td className="py-3.5 text-center whitespace-nowrap">
-                    <div className="inline-flex items-center gap-2 text-slate-400">
-                      <button
-                        onClick={() => setDetailItem(item)}
-                        title="Lihat Detail"
-                        className="p-1 hover:text-slate-700 transition"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => alert(`Edit jamaah ${item.name}`)}
-                        title="Ubah Data"
-                        className="p-1 hover:text-slate-700 transition"
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        title="Hapus"
-                        className="p-1 hover:text-red-600 transition"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                  {/* Aksi (Hanya tombol Lihat) */}
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <Link
+                      href={`/jamaah/${item.id}`}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                    >
+                      Lihat
+                    </Link>
                   </td>
                 </tr>
-              ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal Tambah Jamaah (100% Fungsional) */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in-50">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-sm">
-                Tambah Jamaah Bimbingan Baru
-              </h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddJamaah} className="space-y-3 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Nama Lengkap Sesuai KTP / Paspor
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Contoh: Muhammad Ilham"
-                  className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Jenis Kelamin
-                  </label>
-                  <select
-                    value={newGender}
-                    onChange={(e) => setNewGender(e.target.value as any)}
-                    className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
-                  >
-                    <option value="Laki-laki">Laki-laki</option>
-                    <option value="Perempuan">Perempuan</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Cabang
-                  </label>
-                  <select
-                    value={newBranch}
-                    onChange={(e) => setNewBranch(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
-                  >
-                    <option>Kantor Pusat Jakarta</option>
-                    <option>Cabang Surabaya</option>
-                    <option>Cabang Bandung</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Nomor Induk Kependudukan (NIK)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newNik}
-                  onChange={(e) => setNewNik(e.target.value)}
-                  placeholder="16 Digit NIK KTP"
-                  className="w-full rounded-lg border border-slate-200 p-2 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Nomor WhatsApp
-                  </label>
-                  <input
-                    type="text"
-                    value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value)}
-                    placeholder="0812xxxx"
-                    className="w-full rounded-lg border border-slate-200 p-2 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Nomor Paspor (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newPaspor}
-                    onChange={(e) => setNewPaspor(e.target.value)}
-                    placeholder="Contoh: E889901"
-                    className="w-full rounded-lg border border-slate-200 p-2 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
-                >
-                  Simpan Jamaah
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Modal Detail Jamaah */}
-      {detailItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in-50">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="font-bold text-slate-900 text-sm">
-                Detail Profil Jamaah
+      {viewingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white border border-gray-200 rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-base font-bold text-gray-900">
+                Detail Jamaah Bimbingan
               </h3>
               <button
-                onClick={() => setDetailItem(null)}
-                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setViewingItem(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg cursor-pointer"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Kode Jamaah:</span>
-                <span className="font-mono font-bold text-slate-900">{detailItem.code}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Nama Lengkap:</span>
-                <span className="font-semibold text-slate-900">{detailItem.name}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Jenis Kelamin:</span>
-                <span className="font-medium text-slate-800">{detailItem.gender}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">NIK (KTP):</span>
-                <span className="font-mono text-slate-800">{detailItem.nik}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Nomor Paspor:</span>
-                <span className="font-mono text-slate-800">{detailItem.paspor}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Cabang:</span>
-                <span className="text-slate-800">{detailItem.branch}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400">Pembimbing:</span>
-                <span className="text-slate-800 font-medium">Ustadz Abdullah</span>
+            <div className="p-6 space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-400">Kode Jamaah</p>
+                  <p className="font-semibold text-gray-900 mt-0.5">{viewingItem.kode}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Nama Lengkap</p>
+                  <p className="font-semibold text-gray-900 mt-0.5">{viewingItem.nama}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Jenis Kelamin</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.gender}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">NIK (KTP)</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.nik}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Nomor Telepon</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.phone}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Email</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.email}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Nomor Paspor</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.paspor}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Kedaluwarsa Paspor</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.expDate}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Agen Mitra</p>
+                  <p className="font-medium text-gray-800 mt-0.5">{viewingItem.agen}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Pembimbing / Muthawif</p>
+                  {/* Belum ada kolom muthawif pada data jamaah Supabase */}
+                  <p className="font-medium text-teal-700 mt-0.5">-</p>
+                </div>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
               <button
-                onClick={() => setDetailItem(null)}
-                className="px-4 py-1.5 rounded-lg bg-emerald-700 text-white font-semibold"
+                onClick={() => setViewingItem(null)}
+                className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 font-medium text-sm px-4 py-2 rounded-lg transition cursor-pointer"
               >
                 Tutup
               </button>

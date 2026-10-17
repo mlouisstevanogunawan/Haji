@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type AgentRow = Database["public"]["Tables"]["agents"]["Row"];
@@ -37,46 +38,13 @@ export async function getAgentById(id: string): Promise<AgentRow | null> {
 }
 
 export async function createAgent(payload: AgentInsert): Promise<AgentRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("agents")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating agent:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<AgentRow>("agents", { ...payload });
 }
 
 export async function updateAgent(id: string, payload: AgentUpdate): Promise<AgentRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("agents")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating agent:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<AgentRow>("agents", id, { ...payload });
 }
 
 export async function deleteAgent(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("agents").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting agent:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("agents", id);
 }

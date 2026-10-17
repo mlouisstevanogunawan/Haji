@@ -1,290 +1,259 @@
 "use client";
 
 import * as React from "react";
-import {
-  Users,
-  BookOpen,
-  CheckCircle2,
-  Plane,
-  Clock,
-  MapPin,
-  ClipboardCheck,
-  ArrowUpRight,
-  ArrowRight,
-} from "lucide-react";
-import { DonutChart } from "../shared/Charts";
-import { fetchMuthawifDashboard, MuthawifDashboardData } from "@/features/dashboard/services/dashboardService";
+import Link from "next/link";
+import { Users, Calendar, Check } from "lucide-react";
+import { fetchMuthawifDashboard } from "@/features/dashboard/services/dashboardService";
+import { getManasikSessions, ManasikSessionRecord } from "@/services/manasikService";
+import { getAnnouncements, AnnouncementRow } from "@/services/announcementService";
+
+const BULAN_SINGKAT = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+function tanggalParts(dateStr: string) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return { hari: "-", bulan: "-" };
+  return { hari: String(d.getDate()), bulan: BULAN_SINGKAT[d.getMonth()] };
+}
 
 export const MuthawifDashboard: React.FC = () => {
-  const [data, setData] = React.useState<MuthawifDashboardData | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [data, setData] = React.useState<Awaited<ReturnType<typeof fetchMuthawifDashboard>> | null>(null);
+  const [sessions, setSessions] = React.useState<ManasikSessionRecord[]>([]);
+  const [announcements, setAnnouncements] = React.useState<AnnouncementRow[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
 
   React.useEffect(() => {
     let cancelled = false;
-    async function load() {
+    async function loadData() {
       try {
-        const result = await fetchMuthawifDashboard();
-        if (!cancelled) setData(result);
+        const [dashboard, allSessions, anns] = await Promise.all([
+          fetchMuthawifDashboard(),
+          getManasikSessions(),
+          getAnnouncements(),
+        ]);
+        if (cancelled) return;
+        setData(dashboard);
+        setSessions(allSessions);
+        setAnnouncements(anns || []);
+        setError(null);
       } catch (err) {
-        console.error("Failed to load muthawif dashboard:", err);
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setError((err as Error).message);
       }
     }
-    load();
-    return () => { cancelled = true; };
+    loadData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (loading) {
-    return (
-      <div className="space-y-6 pb-12">
-        <div className="rounded-2xl bg-[#033c2a] p-8 animate-pulse h-40" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-2xl border border-slate-100 bg-white p-5 h-32 animate-pulse" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const today = new Date().toISOString().split("T")[0];
+  const upcoming = sessions
+    .filter((s) => (s.session_date || "") >= today)
+    .slice(0, 3);
+  const todaysCount = sessions.filter((s) => s.session_date?.split("T")[0] === today).length;
 
-  if (!data) {
-    return (
-      <div className="flex items-center justify-center py-20 text-sm text-slate-400">
-        Gagal memuat data dashboard muthawif. Silakan refresh halaman.
-      </div>
-    );
-  }
-
-  const { kpis, nextSession, attendanceSegments, jamaahList } = data;
+  const donutSize = 160;
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const segments = data?.attendanceSegments ?? [];
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-[#033c2a] p-6 sm:p-8 text-white shadow-xl shadow-emerald-950/10">
-        <div
-          className="absolute inset-0 opacity-10 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, #ffffff 1px, transparent 1px)`,
-            backgroundSize: "20px 20px",
-          }}
-        />
-
-        <div className="relative z-10 max-w-3xl">
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-800/80 px-3.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-emerald-200 border border-emerald-700/50 mb-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Portal Bimbingan Ibadah & Muthawif
-          </div>
-
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
-            Ahlan Wa Sahlan, {data.muthawifName}
-          </h1>
-
-          <p className="text-sm text-emerald-100/80 leading-relaxed max-w-2xl">
-            Kelola presensi manasik jamaah, koordinasi rombongan penerbangan, dan pantau
-            data kesehatan jamaah bimbingan Anda.
-          </p>
-        </div>
+    <div className="space-y-6">
+      {/* Header section matching Screenshot 3 */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">
+          Dashboard Muthawif{data ? ` — ${data.muthawifName}` : ""}
+        </h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Jamaah bimbingan &amp; jadwal manasik Anda
+        </p>
       </div>
 
-      {/* 4 Metric KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Total Jamaah Bimbingan
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Users className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.totalJamaah} Jamaah</span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Grup bimbingan aktif</p>
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-4 py-3">
+          Gagal memuat data dashboard: {error}
         </div>
+      )}
 
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Sesi Manasik Selesai
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <BookOpen className="h-4.5 w-4.5" />
-            </div>
+      {/* 3 Stat Cards in a row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Stat 1: Jamaah Bimbingan */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 flex-shrink-0">
+            <Users className="h-6 w-6" />
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.sesiSelesai} dari {kpis.totalSesi} Sesi</span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">
-            {kpis.totalSesi - kpis.sesiSelesai > 0
-              ? `${kpis.totalSesi - kpis.sesiSelesai} sesi pemantapan tersisa`
-              : "Semua sesi selesai"}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Rata-rata Kehadiran
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CheckCircle2 className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.rataKehadiran}%</span>
-            <span className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full ${
-              kpis.rataKehadiran >= 80
-                ? "text-emerald-700 bg-emerald-50"
-                : kpis.rataKehadiran >= 60
-                ? "text-amber-700 bg-amber-50"
-                : "text-red-700 bg-red-50"
-            }`}>
-              {kpis.rataKehadiran >= 80 ? "Tinggi" : kpis.rataKehadiran >= 60 ? "Sedang" : "Rendah"}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Presensi manasik aktif</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Keberangkatan Terdekat
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Plane className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              {kpis.nextDepartureDate !== "-"
-                ? new Date(kpis.nextDepartureDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })
-                : "-"}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">{kpis.nextAirline}</p>
-        </div>
-      </div>
-
-      {/* Row 2: Sesi Manasik & Presensi */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-base text-slate-900">Sesi Manasik Mendatang</h3>
-                <p className="text-xs text-slate-400">Jadwal bimbingan teori & praktik yang Anda pimpin</p>
-              </div>
-              <button className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 text-xs font-bold shadow-sm transition active:scale-95">
-                <ClipboardCheck className="h-3.5 w-3.5" />
-                <span>Catat Presensi</span>
-              </button>
-            </div>
+            <p className="text-xs font-medium text-gray-500">Jamaah Bimbingan</p>
+            <p className="text-2xl font-bold text-gray-900 mt-0.5">
+              {data ? data.kpis.totalJamaah : "-"}
+            </p>
+          </div>
+        </div>
 
-            {nextSession ? (
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-                    SESI BERIKUTNYA
-                  </span>
-                  <span className="rounded-full bg-emerald-700 text-white px-2.5 py-0.5 text-[10px] font-bold shadow-sm">
-                    Mendatang
-                  </span>
-                </div>
+        {/* Stat 2: Manasik Hari Ini */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-50 text-blue-600 flex-shrink-0">
+            <Calendar className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Manasik Hari Ini</p>
+            <p className="text-2xl font-bold text-gray-900 mt-0.5">
+              {data ? todaysCount : "-"}
+            </p>
+          </div>
+        </div>
 
-                <h4 className="text-sm font-bold text-slate-900">{nextSession.title}</h4>
+        {/* Stat 3: Total Kehadiran */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 flex-shrink-0">
+            <Check className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Total Kehadiran</p>
+            <p className="text-2xl font-bold text-gray-900 mt-0.5">
+              {data ? `${data.kpis.rataKehadiran}%` : "-"}
+            </p>
+          </div>
+        </div>
+      </div>
 
-                <div className="space-y-1.5 text-xs text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                    <span className="font-medium">
-                      {nextSession.sessionDate ? new Date(nextSession.sessionDate).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "short", year: "numeric" }) : "-"}
-                      {nextSession.sessionTime ? ` • ${nextSession.sessionTime}` : ""}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                    <span>{nextSession.location}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-400">
-                Belum ada sesi manasik terjadwal
-              </div>
+      {/* Row: Manasik Mendatang (kiri) & Rekap Kehadiran (kanan) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: Manasik Mendatang */}
+        <div className="lg:col-span-8 bg-white border border-gray-200 rounded-lg p-6 shadow-sm flex flex-col justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 mb-4">
+              Manasik Mendatang
+            </h2>
+
+            {upcoming.length === 0 && (
+              <p className="text-xs text-gray-400">Belum ada sesi manasik tersimpan.</p>
             )}
-          </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500">
-              {kpis.totalJamaah} jamaah dalam bimbingan
-            </span>
-            <a href="#rooming" className="font-semibold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">
-              Lihat Rooming List
-              <ArrowRight className="h-3 w-3" />
-            </a>
+            <div className="divide-y divide-gray-100">
+              {upcoming.map((s) => {
+                const { hari, bulan } = tanggalParts(s.session_date);
+                return (
+                  <div key={s.id} className="py-3.5 flex items-center justify-between gap-4 first:pt-0">
+                    <div className="flex items-center gap-3.5">
+                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-teal-50 border border-teal-100 text-teal-700 flex-shrink-0 leading-tight">
+                        <span className="text-xs font-bold leading-none">{hari}</span>
+                        <span className="text-[10px] font-semibold uppercase leading-none mt-0.5">{bulan}</span>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">
+                          {s.title || "Sesi Manasik"}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {s.location || "-"}
+                          {s.session_time ? ` · ${s.session_time}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/manasik/absensi/${s.id}`}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 transition whitespace-nowrap cursor-pointer"
+                    >
+                      Absensi
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="lg:col-span-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <h3 className="font-bold text-base text-slate-900">Presensi Kehadiran Jamaah</h3>
-            <p className="text-xs text-slate-400">Rekap kehadiran sesi manasik terakhir</p>
-          </div>
-          <div className="py-2">
-            <DonutChart segments={attendanceSegments} />
+        {/* Right: Rekap Kehadiran with Donut Chart */}
+        <div className="lg:col-span-4 bg-white border border-gray-200 rounded-lg p-6 shadow-sm flex flex-col items-center">
+          <div className="w-full">
+            <h2 className="text-base font-semibold text-gray-900 mb-4 text-left">
+              Rekap Kehadiran
+            </h2>
+
+            {/* Legend diambil dari rekap absensi sesi terakhir */}
+            <div className="flex items-center justify-center gap-4 text-xs font-medium text-gray-600 mb-4">
+              {segments.map((s) => (
+                <div key={s.label} className="flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-xs"
+                    style={{ backgroundColor: s.color }}
+                  />
+                  <span>{s.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Donut Chart SVG */}
+            <div className="flex justify-center items-center py-2">
+              <svg className="w-44 h-44 -rotate-90" viewBox={`0 0 ${donutSize} ${donutSize}`}>
+                {/* Background Ring */}
+                <circle
+                  cx="80"
+                  cy="80"
+                  r={radius}
+                  fill="transparent"
+                  stroke="#f1f5f9"
+                  strokeWidth="24"
+                />
+                {segments.map((s, i) => {
+                  const length = (s.percent / 100) * circumference;
+                  const offset = segments
+                    .slice(0, i)
+                    .reduce((acc, x) => acc + (x.percent / 100) * circumference, 0);
+                  return (
+                    <circle
+                      key={s.label}
+                      cx="80"
+                      cy="80"
+                      r={radius}
+                      fill="transparent"
+                      stroke={s.color}
+                      strokeWidth="24"
+                      strokeDasharray={`${length} ${circumference - length}`}
+                      strokeDashoffset={-offset}
+                    >
+                      <title>{`${s.label}: ${s.count}`}</title>
+                    </circle>
+                  );
+                })}
+              </svg>
+            </div>
+
+            <p className="text-[11px] text-gray-400 text-center">
+              {data ? `${data.kpis.sesiSelesai}/${data.kpis.totalSesi} sesi selesai` : "Memuat data..."}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Row 3: Daftar Jamaah Bimbingan Table */}
-      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-bold text-base text-slate-900">Daftar Jamaah Bimbingan</h3>
-            <p className="text-xs text-slate-400">Jamaah kloter binaan {data.muthawifName}</p>
-          </div>
-          <a href="#jamaah" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-            Semua Jamaah
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </a>
-        </div>
+      {/* Card: Pengumuman Terbaru */}
+      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+        <h2 className="text-base font-semibold text-gray-900 mb-4">
+          Pengumuman Terbaru
+        </h2>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold">
-                <th className="pb-3 font-medium">Nama Jamaah</th>
-                <th className="pb-3 font-medium">Kota Asal</th>
-                <th className="pb-3 font-medium">WhatsApp</th>
-                <th className="pb-3 font-medium">Tipe Kamar</th>
-                <th className="pb-3 font-medium text-right">Progres Manasik</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {jamaahList.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-400">Belum ada data jamaah bimbingan</td>
-                </tr>
-              ) : (
-                jamaahList.map((j) => (
-                  <tr key={j.id} className="hover:bg-slate-50/60 transition">
-                    <td className="py-3 font-semibold text-slate-900">{j.name}</td>
-                    <td className="py-3 text-slate-600">{j.city}</td>
-                    <td className="py-3 text-slate-600 font-mono">{j.phone}</td>
-                    <td className="py-3 text-slate-600">{j.roomType}</td>
-                    <td className="py-3 text-right">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-100">
-                        <CheckCircle2 className="h-3 w-3" />
-                        {j.manasikProgress}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        {announcements.filter((a) => a.is_published).length === 0 && (
+          <p className="text-xs text-gray-400">Belum ada pengumuman terbit.</p>
+        )}
+
+        <div className="space-y-4">
+          {announcements
+            .filter((a) => a.is_published)
+            .slice(0, 3)
+            .map((a) => (
+              <div key={a.id} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                    {a.target_audience || "Umum"}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {(a.published_at || a.created_at || "").split("T")[0] || "-"}
+                  </span>
+                </div>
+                <h3 className="text-sm font-bold text-gray-900">{a.title}</h3>
+                <p className="text-xs text-gray-600 leading-relaxed">{a.content}</p>
+              </div>
+            ))}
         </div>
       </div>
     </div>

@@ -1,452 +1,306 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
-  Megaphone,
   Plus,
-  Search,
-  ChevronDown,
   Edit2,
   Trash2,
-  Calendar,
-  ArrowLeft,
-  Check,
+  X,
+  CheckCircle2,
+  Megaphone,
 } from "lucide-react";
-
 import {
   getAnnouncements,
   createAnnouncement,
+  updateAnnouncement,
   deleteAnnouncement,
   AnnouncementRow,
-  AnnouncementAudience,
 } from "@/services/announcementService";
+import { getBranches } from "@/services/branchService";
 
-interface AnnouncementItem {
+interface PengumumanItem {
   id: string;
-  title: string;
-  excerpt: string;
-  targetAudience: "Semua Pengguna" | "Mitra Agen" | "Jamaah";
-  branch: string;
+  judul: string;
+  audiens: "Jamaah" | "Agen" | "Semua";
+  cabang: string;
   status: "Published" | "Draft";
   isLive: boolean;
-  publishTime: string;
+  publish: string;
+  konten?: string;
 }
 
-export default function PengumumanTravelPage() {
-  const [announcements, setAnnouncements] = React.useState<AnnouncementItem[]>([]);
-  const [isLoading, setIsLoading] = React.useState<boolean>(true);
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [audienceFilter, setAudienceFilter] = React.useState("Semua Audiens");
-  const [isAdding, setIsAdding] = React.useState(false);
+export default function PengumumanPage() {
+  const [items, setItems] = React.useState<PengumumanItem[]>([]);
+  const [, setIsLoading] = React.useState(true);
+  const [toastMessage, setToastMessage] = React.useState<string | null>(null);
 
-  // Form state matching Screenshot 1
-  const [formTitle, setFormTitle] = React.useState("");
-  const [formContent, setFormContent] = React.useState("");
-  const [formAudience, setFormAudience] = React.useState<"Semua Pengguna" | "Mitra Agen" | "Jamaah">("Semua Pengguna");
-  const [formBranch, setFormBranch] = React.useState("Semua Cabang (Nasional)");
-  const [formPackage, setFormPackage] = React.useState("Umum (Semua Paket)");
-  const [formPublishDate, setFormPublishDate] = React.useState("06/10/2026 00:45");
-  const [formExpireDate, setFormExpireDate] = React.useState("");
-  const [formIsPublished, setFormIsPublished] = React.useState(true);
+  // Modals
+  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [editItem, setEditItem] = React.useState<PengumumanItem | null>(null);
 
-  const loadAnnouncements = React.useCallback(async () => {
+  // Form states for Add
+  const [formJudul, setFormJudul] = React.useState("");
+  const [formAudiens, setFormAudiens] = React.useState<"Jamaah" | "Agen">("Jamaah");
+  const [formKonten, setFormKonten] = React.useState("");
+
+  const showToast = React.useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  }, []);
+
+  const loadData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getAnnouncements();
-      const mapped: AnnouncementItem[] = data.map((a) => {
-        let aud: "Semua Pengguna" | "Mitra Agen" | "Jamaah" = "Semua Pengguna";
-        if (a.target_audience === "agents") aud = "Mitra Agen";
-        else if (a.target_audience === "jamaah") aud = "Jamaah";
+      const [records, branchRows] = await Promise.all([
+        getAnnouncements(),
+        getBranches().catch(() => []),
+      ]);
+      const branchNames: Record<string, string> = {};
+      for (const b of branchRows) branchNames[b.id] = b.name;
+
+      const mapped: PengumumanItem[] = (records || []).map((a: AnnouncementRow) => {
+        let aud: PengumumanItem["audiens"] = "Jamaah";
+        if (a.target_audience === "agents") aud = "Agen";
+        else if (a.target_audience === "all") aud = "Semua";
+
+        // Tanggal tayang diambil dari published_at (fallback created_at).
+        const tanggalTayang = a.published_at || a.created_at;
+        let pubDate = "-";
+        if (tanggalTayang) {
+          try {
+            const dt = new Date(tanggalTayang);
+            pubDate = `${dt.toLocaleDateString("id-ID", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })} ${dt.toLocaleTimeString("id-ID", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}`;
+          } catch {}
+        }
 
         return {
           id: a.id,
-          title: a.title,
-          excerpt: a.content || "Informasi resmi travel umroh.",
-          targetAudience: aud,
-          branch: "Semua Cabang",
+          judul: a.title,
+          audiens: aud,
+          // Nama cabang dipetakan dari branch_id (kolom FK nyata).
+          cabang: a.branch_id ? branchNames[a.branch_id] ?? "-" : "Semua Cabang",
           status: a.is_published ? "Published" : "Draft",
           isLive: a.is_published,
-          publishTime: a.published_at?.split("T")[0] || a.created_at?.split("T")[0] || "Hari ini",
+          publish: pubDate,
+          konten: a.content,
         };
       });
-      setAnnouncements(mapped);
-    } catch (err: any) {
-      console.error("Failed to load announcements from Supabase:", err);
+      setItems(mapped);
+    } catch (err: unknown) {
+      console.error("Gagal memuat pengumuman:", err);
+      setItems([]);
+      showToast(`Gagal memuat pengumuman: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   React.useEffect(() => {
-    loadAnnouncements();
-  }, [loadAnnouncements]);
+    loadData();
+  }, [loadData]);
 
-  const filteredList = announcements.filter((item) => {
-    const matchesSearch =
-      item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.excerpt.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.branch.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    if (audienceFilter === "Semua Audiens") return matchesSearch;
-    return matchesSearch && item.targetAudience === audienceFilter;
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle) return;
-
-    let audDb: AnnouncementAudience = "all";
-    if (formAudience === "Mitra Agen") audDb = "agents";
-    else if (formAudience === "Jamaah") audDb = "jamaah";
+    if (!formJudul.trim()) return;
 
     try {
       await createAnnouncement({
-        title: formTitle,
-        content: formContent || "Informasi pengumuman resmi.",
-        target_audience: audDb,
-        is_published: formIsPublished,
-        published_at: formIsPublished ? new Date().toISOString() : null,
+        title: formJudul,
+        content: formKonten,
+        target_audience: formAudiens === "Agen" ? "agents" : "jamaah",
+        is_published: true,
+        published_at: new Date().toISOString(),
       });
+      setIsAddModalOpen(false);
+      setFormJudul("");
+      setFormKonten("");
+      await loadData();
+      showToast("Pengumuman berhasil disimpan ke Supabase!");
+    } catch (err: unknown) {
+      console.error("Gagal menambah pengumuman:", err);
+      showToast(`Gagal menyimpan pengumuman: ${(err as Error).message}`);
+    }
+  };
 
-      setIsAdding(false);
-      setFormTitle("");
-      setFormContent("");
-      await loadAnnouncements();
-    } catch (err: any) {
-      alert(`Gagal menerbitkan pengumuman: ${err.message}`);
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editItem) return;
+
+    const audienceMap: Record<PengumumanItem["audiens"], "jamaah" | "agents" | "all"> = {
+      Jamaah: "jamaah",
+      Agen: "agents",
+      Semua: "all",
+    };
+
+    try {
+      await updateAnnouncement(editItem.id, {
+        title: editItem.judul,
+        content: editItem.konten,
+        target_audience: audienceMap[editItem.audiens],
+      });
+      setEditItem(null);
+      await loadData();
+      showToast("Perubahan pengumuman berhasil disimpan ke Supabase!");
+    } catch (err: unknown) {
+      console.error("Gagal memperbarui pengumuman:", err);
+      showToast(`Gagal menyimpan perubahan: ${(err as Error).message}`);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("Apakah Anda yakin ingin menghapus pengumuman ini dari database?")) {
+    if (confirm("Hapus pengumuman ini?")) {
       try {
         await deleteAnnouncement(id);
-        await loadAnnouncements();
-      } catch (err: any) {
-        alert(`Gagal menghapus pengumuman: ${err.message}`);
+        await loadData();
+        showToast("Pengumuman berhasil dihapus dari Supabase.");
+      } catch (err: unknown) {
+        console.error("Gagal menghapus pengumuman:", err);
+        showToast(`Gagal menghapus pengumuman: ${(err as Error).message}`);
       }
     }
   };
 
-  // If in Add Mode, show EXACT form from Screenshot 1
-  if (isAdding) {
-    return (
-      <div className="space-y-6 pb-16 max-w-4xl">
-        {/* Header section */}
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Tambah Pengumuman Baru
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Terbitkan informasi atau instruksi penting kepada audiens terarah
-          </p>
-        </div>
-
-        {/* Card: Informasi Pengumuman Baru */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
-          <h3 className="font-bold text-sm text-slate-900 mb-4 border-b border-slate-100 pb-3">
-            Informasi Pengumuman Baru
-          </h3>
-
-          <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-            {/* Judul Pengumuman */}
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Judul Pengumuman <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={formTitle}
-                onChange={(e) => setFormTitle(e.target.value)}
-                placeholder="Contoh: Jadwal Manasik Akbar Syawal 1447H"
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
-            </div>
-
-            {/* Isi Pengumuman */}
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Isi Pengumuman <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                rows={4}
-                required
-                value={formContent}
-                onChange={(e) => setFormContent(e.target.value)}
-                placeholder="Tuliskan isi pengumuman atau instruksi penting kepada audiens.."
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-y"
-              />
-            </div>
-
-            {/* Target Audiens & Cabang Tertarget */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Target Audiens <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <select
-                    value={formAudience}
-                    onChange={(e) => setFormAudience(e.target.value as any)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
-                  >
-                    <option value="Semua Pengguna">Semua Pengguna</option>
-                    <option value="Mitra Agen">Mitra Agen</option>
-                    <option value="Jamaah">Jamaah</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Cabang Tertarget
-                </label>
-                <div className="relative">
-                  <select
-                    value={formBranch}
-                    onChange={(e) => setFormBranch(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
-                  >
-                    <option>Semua Cabang (Nasional)</option>
-                    <option>Kantor Pusat Jakarta</option>
-                    <option>Cabang Bandung</option>
-                    <option>Cabang Surabaya</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-            </div>
-
-            {/* Terkait Paket Tertentu (Opsional) */}
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Terkait Paket Tertentu (Opsional)
-              </label>
-              <div className="relative">
-                <select
-                  value={formPackage}
-                  onChange={(e) => setFormPackage(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-8"
-                >
-                  <option>Umum (Semua Paket)</option>
-                  <option>Umroh Reguler Syawal 1447H</option>
-                  <option>Umroh Ramadhan Berkah I'tikaf</option>
-                  <option>Haji Khusus Furoda VIP</option>
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Tayang Mulai & Kedaluwarsa */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Tayang Mulai (Waktu Terbit)
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={formPublishDate}
-                    onChange={(e) => setFormPublishDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-9"
-                  />
-                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Kedaluwarsa (Opsional)
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="dd/mm/yyyy -- : --"
-                    value={formExpireDate}
-                    onChange={(e) => setFormExpireDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-9"
-                  />
-                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                </div>
-              </div>
-            </div>
-
-            {/* Checkbox Terbitkan Pengumuman */}
-            <div className="pt-2">
-              <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={formIsPublished}
-                  onChange={(e) => setFormIsPublished(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <div>
-                  <span className="font-bold text-slate-900 block text-xs">
-                    Terbitkan Pengumuman (Publikasikan Langsung)
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    Bila tidak dicentang, pengumuman tersimpan sebagai Draft dan belum tampak oleh audiens.
-                  </span>
-                </div>
-              </label>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="pt-4 flex items-center gap-3">
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2.5 text-xs font-semibold shadow-sm transition active:scale-95"
-              >
-                <Megaphone className="h-4 w-4" />
-                <span>Terbitkan Pengumuman</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 px-4 py-2.5 text-xs font-semibold transition shadow-sm"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                <span>Batal</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // Default: Table view
   return (
-    <div className="space-y-6 pb-12">
+    <div className="p-6 md:p-8 space-y-6">
       {/* Header section */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-          Pengumuman
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          Kelola pengumuman &amp; edaran resmi untuk staf, agen mitra, dan jamaah
-        </p>
-      </div>
-
-      {/* Filter / Search Bar */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-        <div className="flex flex-1 items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari judul, isi pengumuman..."
-              className="w-full pl-9 pr-4 py-1.5 text-xs text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
-            />
-          </div>
-
-          <div className="relative">
-            <select
-              value={audienceFilter}
-              onChange={(e) => setAudienceFilter(e.target.value)}
-              className="appearance-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 pr-8 focus:outline-none"
-            >
-              <option>Semua Audiens</option>
-              <option>Semua Pengguna</option>
-              <option>Mitra Agen</option>
-              <option>Jamaah</option>
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+            <span>Beranda</span>
+            <span>&gt;</span>
+            <span className="text-gray-900 font-medium">Pengumuman</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900">Pengumuman</h1>
+          <p className="text-sm text-gray-500">Kelola pengumuman untuk pengguna</p>
         </div>
 
-        <button
-          onClick={() => setIsAdding(true)}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition active:scale-95 flex-shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Tambah Pengumuman</span>
-        </button>
+        {/* Primary Button */}
+        <div>
+          <Link
+            href="/pengumuman/tambah"
+            className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 rounded-lg transition shadow-sm cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Tambah Pengumuman</span>
+          </Link>
+        </div>
       </div>
 
-      {/* Table Data */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+      {/* Tabel */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                <th className="pb-3.5 font-bold">JUDUL &amp; TERKAIT</th>
-                <th className="pb-3.5 font-bold">TARGET AUDIENS</th>
-                <th className="pb-3.5 font-bold">CABANG</th>
-                <th className="pb-3.5 font-bold">STATUS PUBLIKASI</th>
-                <th className="pb-3.5 font-bold">MULAI TAYANG</th>
-                <th className="pb-3.5 font-bold text-center">AKSI</th>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JUDUL
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  AUDIENS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  CABANG
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  STATUS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PUBLISH
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredList.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                  {/* Judul & Terkait */}
-                  <td className="py-3.5 pr-4 max-w-sm">
-                    <p className="font-semibold text-slate-900">{item.title}</p>
-                    <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                      {item.excerpt}
-                    </p>
+            <tbody className="divide-y divide-gray-100">
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-400">
+                    Belum ada pengumuman tersimpan di Supabase.
+                  </td>
+                </tr>
+              )}
+              {items.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Judul */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.judul}
                   </td>
 
-                  {/* Target Audiens */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${
-                        item.targetAudience === "Semua Pengguna"
-                          ? "bg-purple-50 text-purple-700 border-purple-200/60"
-                          : item.targetAudience === "Mitra Agen"
-                          ? "bg-amber-50 text-amber-700 border-amber-200/60"
-                          : "bg-blue-50 text-blue-700 border-blue-200/60"
-                      }`}
-                    >
-                      {item.targetAudience}
-                    </span>
+                  {/* Audiens */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {item.audiens === "Jamaah" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        Jamaah
+                      </span>
+                    )}
+                    {item.audiens === "Agen" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                        Agen
+                      </span>
+                    )}
+                    {item.audiens === "Semua" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        Semua
+                      </span>
+                    )}
                   </td>
 
                   {/* Cabang */}
-                  <td className="py-3.5 pr-4 text-slate-700 font-medium whitespace-nowrap">
-                    {item.branch}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.cabang}
                   </td>
 
-                  {/* Status Publikasi */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200/60">
-                      <span>Published</span>
-                      {item.isLive && (
-                        <span className="flex items-center gap-1 font-bold text-emerald-800">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          Live
+                  {/* Status */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="inline-flex items-center">
+                      {item.status === "Published" ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                          Published
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          Draft
                         </span>
                       )}
-                    </span>
+                      {item.isLive && (
+                        <span className="text-xs text-emerald-600 font-medium ml-1.5 flex items-center gap-1">
+                          &bull; Live
+                        </span>
+                      )}
+                    </div>
                   </td>
 
-                  {/* Mulai Tayang */}
-                  <td className="py-3.5 pr-4 text-slate-600 whitespace-nowrap">
-                    {item.publishTime}
+                  {/* Publish */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    {item.publish}
                   </td>
 
                   {/* Aksi */}
-                  <td className="py-3.5 text-center whitespace-nowrap">
-                    <div className="inline-flex items-center gap-2 text-slate-400">
-                      <button
-                        title="Ubah Pengumuman"
-                        className="p-1 hover:text-slate-700 transition"
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <div className="inline-flex items-center gap-3">
+                      <Link
+                        href={`/pengumuman/edit/${item.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
                       >
                         <Edit2 className="h-3.5 w-3.5" />
-                      </button>
+                        <span>Edit</span>
+                      </Link>
                       <button
                         onClick={() => handleDelete(item.id)}
-                        title="Hapus"
-                        className="p-1 hover:text-red-600 transition"
+                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium transition cursor-pointer"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
+                        <span>Hapus</span>
                       </button>
                     </div>
                   </td>
@@ -456,6 +310,161 @@ export default function PengumumanTravelPage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Tambah Pengumuman */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Tambah Pengumuman Baru</h3>
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreate} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Judul Pengumuman <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Pelunasan Umroh Reguler"
+                  value={formJudul}
+                  onChange={(e) => setFormJudul(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Target Audiens</label>
+                  <select
+                    value={formAudiens}
+                    onChange={(e) => setFormAudiens(e.target.value as "Jamaah" | "Agen")}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="Jamaah">Jamaah</option>
+                    <option value="Agen">Agen</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Isi Pesan Pengumuman</label>
+                <textarea
+                  rows={4}
+                  placeholder="Tuliskan isi pengumuman secara rinci..."
+                  value={formKonten}
+                  onChange={(e) => setFormKonten(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500 resize-y"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Publikasikan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Pengumuman */}
+      {editItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Edit Pengumuman</h3>
+              <button
+                onClick={() => setEditItem(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Judul Pengumuman</label>
+                <input
+                  type="text"
+                  required
+                  value={editItem.judul}
+                  onChange={(e) => setEditItem({ ...editItem, judul: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Target Audiens</label>
+                  <select
+                    value={editItem.audiens}
+                    onChange={(e) =>
+                      setEditItem({
+                        ...editItem,
+                        audiens: e.target.value as PengumumanItem["audiens"],
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="Jamaah">Jamaah</option>
+                    <option value="Agen">Agen</option>
+                    <option value="Semua">Semua</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Isi Pesan</label>
+                <textarea
+                  rows={4}
+                  value={editItem.konten || ""}
+                  onChange={(e) => setEditItem({ ...editItem, konten: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500 resize-y"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditItem(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notifikasi */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[70] max-w-sm rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg">
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }

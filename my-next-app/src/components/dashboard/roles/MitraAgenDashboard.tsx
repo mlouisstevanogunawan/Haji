@@ -2,310 +2,371 @@
 
 import * as React from "react";
 import {
-  Link2,
-  CheckCircle2,
-  Clock,
   Users,
-  Copy,
-  Check,
-  TrendingUp,
-  ArrowUpRight,
+  CheckCircle2,
+  CreditCard,
+  Clock,
 } from "lucide-react";
-import { TrendLineChart, DonutChart } from "../shared/Charts";
-import { fetchAgentDashboard, AgentDashboardData } from "@/features/dashboard/services/dashboardService";
+import {
+  fetchAgentDashboard,
+  type AgentDashboardData,
+} from "@/features/dashboard/services/dashboardService";
+import { getAnnouncements, AnnouncementRow } from "@/services/announcementService";
+
+function formatRpShort(amount: number): string {
+  if (amount >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(2)} M`;
+  if (amount >= 1_000_000) return `Rp ${(amount / 1_000_000).toFixed(2)} Jt`;
+  return `Rp ${Math.round(amount).toLocaleString("id-ID")}`;
+}
+
+const AUDIENCE_LABELS: Record<string, { label: string; className: string }> = {
+  all: { label: "Semua Pengguna", className: "bg-purple-50 text-purple-700" },
+  agen: { label: "Agen", className: "bg-amber-50 text-amber-700" },
+  jamaah: { label: "Jamaah", className: "bg-teal-50 text-teal-700" },
+  muthawif: { label: "Muthawif", className: "bg-blue-50 text-blue-700" },
+};
 
 export const MitraAgenDashboard: React.FC = () => {
-  const [copied, setCopied] = React.useState(false);
   const [data, setData] = React.useState<AgentDashboardData | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [announcements, setAnnouncements] = React.useState<AnnouncementRow[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
 
   React.useEffect(() => {
     let cancelled = false;
-    async function load() {
+    async function loadData() {
       try {
-        const result = await fetchAgentDashboard();
-        if (!cancelled) setData(result);
+        const [dashboard, anns] = await Promise.all([
+          fetchAgentDashboard(),
+          getAnnouncements().catch(() => [] as AnnouncementRow[]),
+        ]);
+        if (cancelled) return;
+        setData(dashboard);
+        setAnnouncements(
+          (anns || [])
+            .filter((a) => a.is_published)
+            .sort(
+              (a, b) =>
+                new Date(b.published_at || b.created_at || 0).getTime() -
+                new Date(a.published_at || a.created_at || 0).getTime()
+            )
+            .slice(0, 3)
+        );
+        setError(null);
       } catch (err) {
-        console.error("Failed to load agent dashboard:", err);
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setError((err as Error).message);
       }
     }
-    load();
-    return () => { cancelled = true; };
+    loadData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const referralLink = data
-    ? `https://travel-umroh.id/register?ref=${data.referralCode}`
-    : "";
+  // SVG dimensions for Komisi per Bulan bar chart
+  const width = 680;
+  const height = 220;
+  const paddingLeft = 70;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 30;
 
-  const handleCopy = () => {
-    if (!referralLink) return;
-    navigator.clipboard?.writeText(referralLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
 
-  if (loading) {
-    return (
-      <div className="space-y-6 pb-12">
-        <div className="rounded-2xl bg-gradient-to-r from-[#c2410c] to-[#ea580c] p-8 animate-pulse h-48" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-2xl border border-slate-100 bg-white p-5 h-32 animate-pulse" />
+  const trend = data?.trendData ?? [];
+  const maxVal = Math.max(1_000_000, ...trend.map((t) => t.value));
+  const yTicks = [1, 0.75, 0.5, 0.25, 0].map((f) =>
+    Math.round((maxVal * f) / 100_000) * 100_000
+  );
+
+  // Donut chart calculations
+  const donutSize = 140;
+  const strokeWidth = 24;
+  const radius = (donutSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  const segments = data?.paymentSegments ?? [];
+  const kpis = data?.kpis;
+
+  return (
+    <div className="p-6 md:p-8 space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+          Dashboard Agen{data ? ` — ${data.agentName}` : ""}
+        </h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Ringkasan referral &amp; komisi Anda
+          {data?.referralCode ? ` · Kode: ${data.referralCode}` : ""}
+        </p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-4 py-3">
+          Gagal memuat data dashboard: {error}
+        </div>
+      )}
+
+      {/* 4 Stat Cards in a row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Jamaah Referral */}
+        <div className="bg-white border border-gray-200/90 rounded-lg p-5 shadow-2xs flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-teal-50 text-teal-600 flex-shrink-0">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Jamaah Referral</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">
+              {kpis ? kpis.totalJamaahReferral : "-"}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 2: Total Komisi */}
+        <div className="bg-white border border-gray-200/90 rounded-lg p-5 shadow-2xs flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 flex-shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Total Komisi</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">
+              {kpis ? formatRpShort(kpis.totalKomisi) : "-"}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 3: Komisi Dibayar */}
+        <div className="bg-white border border-gray-200/90 rounded-lg p-5 shadow-2xs flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600 flex-shrink-0">
+            <CreditCard className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Komisi Dibayar</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">
+              {kpis ? formatRpShort(kpis.sudahDicairkan) : "-"}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 4: Komisi Pending */}
+        <div className="bg-white border border-gray-200/90 rounded-lg p-5 shadow-2xs flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-amber-50 text-amber-600 flex-shrink-0">
+            <Clock className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Komisi Pending</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">
+              {kpis ? formatRpShort(kpis.siapKlaim) : "-"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: Charts (Komisi per Bulan & Status Bayar Jamaah) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Left: Card Komisi per Bulan (~68% width) */}
+        <div className="lg:col-span-8 bg-white border border-gray-200/90 rounded-lg p-6 shadow-2xs flex flex-col justify-between">
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Komisi per Bulan</h2>
+
+          <div className="w-full overflow-x-auto">
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              className="w-full h-auto min-w-[550px] select-none"
+            >
+              {/* Horizontal Grid lines & Y-axis labels */}
+              {yTicks.map((tick) => {
+                const y = paddingTop + (1 - tick / maxVal) * chartHeight;
+                return (
+                  <g key={tick}>
+                    <line
+                      x1={paddingLeft}
+                      y1={y}
+                      x2={width - paddingRight}
+                      y2={y}
+                      stroke="#f1f5f9"
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={paddingLeft - 8}
+                      y={y + 3}
+                      fill="#94a3b8"
+                      fontSize="9"
+                      textAnchor="end"
+                      fontFamily="inherit"
+                    >
+                      {tick === 0 ? "0" : tick.toLocaleString("id-ID")}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Bars and X-axis labels */}
+              {trend.map((item, idx) => {
+                const barWidth = 26;
+                const slotWidth = chartWidth / Math.max(trend.length, 1);
+                const barX = paddingLeft + idx * slotWidth + (slotWidth - barWidth) / 2;
+                const barH = (item.value / maxVal) * chartHeight;
+                const barY = paddingTop + chartHeight - barH;
+
+                return (
+                  <g key={item.label}>
+                    {/* Teal Bar */}
+                    {item.value > 0 && (
+                      <rect
+                        x={barX}
+                        y={barY}
+                        width={barWidth}
+                        height={barH}
+                        fill="#0d9488"
+                        rx="2"
+                        className="transition-all hover:opacity-85"
+                      >
+                        <title>{`${item.label}: Rp ${item.value.toLocaleString("id-ID")}`}</title>
+                      </rect>
+                    )}
+
+                    {/* Month Label */}
+                    <text
+                      x={barX + barWidth / 2}
+                      y={paddingTop + chartHeight + 16}
+                      fill="#64748b"
+                      fontSize="9"
+                      textAnchor="middle"
+                      fontFamily="inherit"
+                    >
+                      {item.label}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+
+        {/* Right: Card Status Bayar Jamaah (~32% width) */}
+        <div className="lg:col-span-4 bg-white border border-gray-200/90 rounded-lg p-6 shadow-2xs flex flex-col justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 mb-3">Status Bayar Jamaah</h2>
+
+            {/* Legend diisi dari data pembayaran referral */}
+            <div className="flex items-center justify-center gap-3 text-[11px] text-gray-600 mb-4">
+              {segments.map((s) => (
+                <div key={s.label} className="flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-xs"
+                    style={{ backgroundColor: s.color }}
+                  />
+                  <span>{s.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Centered Donut Chart */}
+          <div className="flex items-center justify-center py-4">
+            <div className="relative w-36 h-36">
+              <svg viewBox={`0 0 ${donutSize} ${donutSize}`} className="w-full h-full -rotate-90">
+                <circle
+                  cx={donutSize / 2}
+                  cy={donutSize / 2}
+                  r={radius}
+                  fill="transparent"
+                  stroke="#e2e8f0"
+                  strokeWidth={strokeWidth}
+                />
+                {segments.map((s, i) => {
+                  const length = (s.percent / 100) * circumference;
+                  const offset = segments
+                    .slice(0, i)
+                    .reduce((acc, x) => acc + (x.percent / 100) * circumference, 0);
+                  return (
+                    <circle
+                      key={s.label}
+                      cx={donutSize / 2}
+                      cy={donutSize / 2}
+                      r={radius}
+                      fill="transparent"
+                      stroke={s.color}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={`${length} ${circumference - length}`}
+                      strokeDashoffset={-offset}
+                    >
+                      <title>{`${s.label}: ${s.count}`}</title>
+                    </circle>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+
+          <div className="text-center text-[11px] text-gray-400">
+            {data
+              ? `${kpis?.totalJamaahReferral ?? 0} Jamaah (${segments[0]?.percent ?? 0}% Lunas)`
+              : "Memuat data..."}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 3: Card Referral Terbaru */}
+      <div className="bg-white border border-gray-200/90 rounded-lg p-6 shadow-2xs space-y-4">
+        <h2 className="text-sm font-semibold text-gray-900">Referral Terbaru</h2>
+
+        {data && data.referrals.length === 0 && (
+          <p className="text-xs text-gray-400 pt-1">Belum ada jamaah referral tersimpan.</p>
+        )}
+
+        <div className="space-y-4 pt-1 divide-y divide-gray-100">
+          {(data?.referrals ?? []).slice(0, 6).map((r) => (
+            <div key={r.id} className="pt-2 first:pt-0 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xs font-bold text-gray-900">{r.pilgrimName}</h3>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                  {r.packageName} · daftar {r.registrationDate || "-"}
+                </p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="text-xs font-bold text-gray-900">
+                  {formatRpShort(r.estimatedCommission)}
+                </p>
+                <p className="text-[11px] text-gray-400">{r.payoutStatus}</p>
+              </div>
+            </div>
           ))}
         </div>
       </div>
-    );
-  }
 
-  if (!data) {
-    return (
-      <div className="flex items-center justify-center py-20 text-sm text-slate-400">
-        Gagal memuat data dashboard agen. Silakan refresh halaman.
-      </div>
-    );
-  }
+      {/* Row 4: Card Pengumuman Terbaru */}
+      <div className="bg-white border border-gray-200/90 rounded-lg p-6 shadow-2xs space-y-4">
+        <h2 className="text-sm font-semibold text-gray-900">Pengumuman Terbaru</h2>
 
-  const { kpis, trendData, paymentSegments, referrals } = data;
+        {announcements.length === 0 && (
+          <p className="text-xs text-gray-400 pt-1">Belum ada pengumuman terbit.</p>
+        )}
 
-  return (
-    <div className="space-y-6 pb-12">
-      {/* Top Warm Orange Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#c2410c] to-[#ea580c] p-6 sm:p-8 text-white shadow-xl shadow-orange-950/10">
-        <div
-          className="absolute inset-0 opacity-10 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, #ffffff 1px, transparent 1px)`,
-            backgroundSize: "20px 20px",
-          }}
-        />
-
-        <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 rounded-full bg-orange-900/40 px-3.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-orange-100 border border-orange-400/30 mb-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-300" />
-            Portal Kemitraan Mitra Agen
-          </div>
-
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
-            Selamat Datang, {data.agentName}
-          </h1>
-
-          <p className="text-sm text-orange-100/90 leading-relaxed max-w-2xl mb-6">
-            Pantau perolehan komisi referral jamaah Anda, riwayat pencairan, dan status
-            pembayaran jamaah bimbingan Anda.
-          </p>
-
-          <div className="rounded-xl bg-black/25 backdrop-blur-md p-4 max-w-2xl border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-orange-200/80 block mb-1">
-                Tautan Referral Jamaah Anda
-              </span>
-              <span className="font-mono text-sm text-white font-medium select-all break-all">
-                {referralLink}
-              </span>
-            </div>
-
-            <button
-              onClick={handleCopy}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-bold text-slate-800 shadow-sm hover:bg-orange-50 transition active:scale-95 flex-shrink-0"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>Tersalin!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5 text-slate-600" />
-                  <span>Salin Tautan</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 4 Metric KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Total Komisi Diperoleh
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Link2 className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              Rp {kpis.totalKomisi.toLocaleString("id-ID")}
-            </span>
-            {kpis.komisiBulanIni > 0 && (
-              <span className="inline-flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                +Rp {(kpis.komisiBulanIni / 1_000_000).toFixed(1)} Jt bln ini
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Akumulasi seluruh referral</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Komisi Sudah Dicairkan
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CheckCircle2 className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              Rp {kpis.sudahDicairkan.toLocaleString("id-ID")}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Ditransfer ke rekening mitra</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Komisi Siap Klaim
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Clock className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">
-              Rp {kpis.siapKlaim.toLocaleString("id-ID")}
-            </span>
-            {kpis.siapKlaim > 0 && (
-              <span className="inline-flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                Dapat dicairkan
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Jamaah telah lunas</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-              Total Jamaah Referral
-            </span>
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Users className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-slate-900">{kpis.totalJamaahReferral} Jamaah</span>
-            {kpis.jamaahBaru > 0 && (
-              <span className="inline-flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                +{kpis.jamaahBaru} jamaah baru
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">Terdaftar via kode {data.referralCode}</p>
-        </div>
-      </div>
-
-      {/* Row 2: Charts */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-base text-slate-900">Tren Perolehan Komisi Bulanan</h3>
-              <p className="text-xs text-slate-400">Pertumbuhan komisi referral Anda 5 bulan terakhir</p>
-            </div>
-            {trendData.length > 1 && trendData[trendData.length - 1].value > 0 && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full">
-                <TrendingUp className="h-3.5 w-3.5" />
-                Aktif
-              </span>
-            )}
-          </div>
-          <div className="pt-2">
-            <TrendLineChart
-              color="amber"
-              dataPoints={trendData.map((d) => d.value)}
-              labels={trendData.map((d) => d.label)}
-            />
-          </div>
-        </div>
-
-        <div className="lg:col-span-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <h3 className="font-bold text-base text-slate-900">Status Bayar Jamaah</h3>
-            <p className="text-xs text-slate-400">
-              Status pelunasan dari {kpis.totalJamaahReferral} referral Anda
-            </p>
-          </div>
-          <div className="py-2">
-            <DonutChart segments={paymentSegments} />
-          </div>
-        </div>
-      </div>
-
-      {/* Row 3: Referral Table */}
-      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-bold text-base text-slate-900">Jamaah Referral Terbaru</h3>
-            <p className="text-xs text-slate-400">
-              Daftar calon jamaah yang mendaftar melalui tautan & kode agen Anda
-            </p>
-          </div>
-          <button className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-800">
-            Klaim Komisi
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold">
-                <th className="pb-3 font-medium">Nama Jamaah</th>
-                <th className="pb-3 font-medium">Paket Ibadah</th>
-                <th className="pb-3 font-medium">Tgl Pendaftaran</th>
-                <th className="pb-3 font-medium">Estimasi Komisi</th>
-                <th className="pb-3 font-medium text-right">Status Pencairan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {referrals.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-400">Belum ada jamaah referral</td>
-                </tr>
-              ) : (
-                referrals.map((ref) => {
-                  const isLunas = ref.payoutStatus.includes("Lunas");
-                  const statusColor = isLunas
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                    : "bg-amber-50 text-amber-700 border-amber-100";
-
-                  return (
-                    <tr key={ref.id} className="hover:bg-slate-50/60 transition">
-                      <td className="py-3 font-semibold text-slate-900">{ref.pilgrimName}</td>
-                      <td className="py-3 text-slate-600">{ref.packageName}</td>
-                      <td className="py-3 text-slate-500 whitespace-nowrap">
-                        {ref.registrationDate ? new Date(ref.registrationDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "-"}
-                      </td>
-                      <td className="py-3 font-bold text-slate-900">
-                        {ref.estimatedCommission > 0 ? `Rp ${ref.estimatedCommission.toLocaleString("id-ID")}` : "-"}
-                      </td>
-                      <td className="py-3 text-right">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${statusColor}`}>
-                          {ref.payoutStatus}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-4 pt-1 divide-y divide-gray-100">
+          {announcements.map((a) => {
+            const audience =
+              AUDIENCE_LABELS[a.target_audience || "all"] || {
+                label: a.target_audience || "Umum",
+                className: "bg-gray-50 text-gray-700",
+              };
+            const dateLabel = (a.published_at || a.created_at || "").split("T")[0];
+            return (
+              <div key={a.id} className="pt-3 first:pt-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${audience.className}`}
+                  >
+                    {audience.label}
+                  </span>
+                  <span className="text-[11px] text-gray-400">{dateLabel || "-"}</span>
+                </div>
+                <h3 className="text-xs font-bold text-gray-900">{a.title}</h3>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{a.content}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

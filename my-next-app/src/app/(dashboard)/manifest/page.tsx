@@ -1,258 +1,192 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   Layers,
-  Search,
-  Calendar,
-  Building2,
-  Plane,
-  Users,
-  ChevronRight,
-  X,
   BedDouble,
   Bus,
-  Check,
+  Users,
+  X,
+  CheckCircle2,
+  Calendar,
+  Building2,
+  FileSpreadsheet,
 } from "lucide-react";
-
 import { getPackages, PackageRow } from "@/services/packageService";
 import { getBookings, BookingWithDetails } from "@/services/bookingService";
 
-interface ManifestPackage {
+interface ManifestItem {
   id: string;
-  name: string;
-  branch: string;
-  category: string;
-  departureDate: string;
-  departureCity: string;
-  makkahHotel: string;
-  madinahHotel: string;
-  airline: string;
-  registeredCount: number;
-  quotaCount: number;
-  pilgrims: string[];
-}
-
-interface RoomGroup {
-  id: string;
-  roomNumber: string;
-  type: "Quad (4 Bed)" | "Triple (3 Bed)" | "Double (2 Bed)";
-  hotelName: string;
-  pilgrims: string[];
+  paket: string;
+  jenis: "Umroh" | "Haji" | "Haji Plus";
+  jumlahJamaah: number;
+  berangkat: string;
+  makkahHotel?: string;
+  madinahHotel?: string;
+  rooms?: {
+    roomNo: string;
+    type: "Quad (4 Bed)" | "Triple (3 Bed)" | "Double (2 Bed)";
+    jamaahList: string[];
+  }[];
+  bus?: string;
 }
 
 export default function ManifestRoomingPage() {
-  const [packages, setPackages] = React.useState<ManifestPackage[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [activePackageForManifest, setActivePackageForManifest] = React.useState<ManifestPackage | null>(null);
+  const [manifestList, setManifestList] = React.useState<ManifestItem[]>([]);
+  const [, setIsLoading] = React.useState(true);
+  const [selectedManifest, setSelectedManifest] = React.useState<ManifestItem | null>(null);
 
-  // Rooming State for Modal
-  const [roomGroups, setRoomGroups] = React.useState<RoomGroup[]>([]);
-  const [selectedBus, setSelectedBus] = React.useState("Bus 01 (Executive SAPTCO)");
-  const [saveToast, setSaveToast] = React.useState(false);
+  // Tab state in modal: "rooms" or "bus"
+  const [modalTab, setModalTab] = React.useState<"rooms" | "bus">("rooms");
 
-  React.useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [pkgs, bks] = await Promise.all([getPackages(), getBookings()]);
-        const mapped: ManifestPackage[] = pkgs.map((p) => {
-          const pkgBookings = bks.filter((b) => b.package_id === p.id);
-          const pilgrims = pkgBookings.map((b) => b.profiles?.full_name || "Jamaah");
-          const facilities = p.facilities || [];
-          const makkahHotel = facilities.find((f) => f.toLowerCase().includes("makkah")) || "Swissôtel Al Maqam Makkah";
-          const madinahHotel = facilities.find((f) => f.toLowerCase().includes("madinah")) || "Dar Al Taqwa Hotel Madinah";
-          const airline = facilities.find((f) => /garuda|saudia|emirates|qatar|lion/i.test(f)) || "Saudia Airlines";
+  const loadData = React.useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [pkgs, bks] = await Promise.all([getPackages(), getBookings()]);
 
-          return {
-            id: p.id,
-            name: p.name,
-            branch: "Kantor Pusat Jakarta",
-            category: p.type === "haji" ? "Haji_khusus" : "Umroh",
-            departureDate: new Date(p.created_at).toLocaleDateString("id-ID", {
-              day: "numeric",
+      const mapped: ManifestItem[] = (pkgs || []).map((p) => {
+        const pkgBookings: BookingWithDetails[] = (bks || []).filter(
+          (b) => b.package_id === p.id
+        );
+        // Nama jamaah berasal dari booking.profiles yang nyata di database.
+        const jamaahNames = pkgBookings
+          .map((b) => b.profiles?.full_name)
+          .filter((nama): nama is string => Boolean(nama));
+
+        let jenisBadge: "Umroh" | "Haji" | "Haji Plus" = "Umroh";
+        if (p.type === "haji") {
+          jenisBadge = p.name.toLowerCase().includes("plus") ? "Haji Plus" : "Haji";
+        }
+
+        let berangkat = "-";
+        if (p.departure_date) {
+          berangkat = p.departure_date;
+          try {
+            berangkat = new Date(p.departure_date).toLocaleDateString("id-ID", {
+              day: "2-digit",
               month: "short",
               year: "numeric",
-            }),
-            departureCity: "Jakarta",
-            makkahHotel,
-            madinahHotel,
-            airline,
-            registeredCount: pkgBookings.length,
-            quotaCount: p.quota || 45,
-            pilgrims,
-          };
-        });
-        setPackages(mapped);
-      } catch (err) {
-        console.error("Gagal memuat manifest dari Supabase:", err);
-        setPackages([]);
-      } finally {
-        setIsLoading(false);
-      }
+            });
+          } catch {}
+        }
+
+        // Rooming sementara: jamaah dipecah 3 orang per kamar dari data booking asli.
+        const rooms: NonNullable<ManifestItem["rooms"]> = [];
+        for (let i = 0; i < jamaahNames.length; i += 3) {
+          rooms.push({
+            roomNo: `Kamar ${i / 3 + 1}`,
+            type: "Triple (3 Bed)",
+            jamaahList: jamaahNames.slice(i, i + 3),
+          });
+        }
+
+        return {
+          id: p.id,
+          paket: p.name,
+          jenis: jenisBadge,
+          jumlahJamaah: pkgBookings.length,
+          berangkat,
+          rooms,
+        };
+      });
+      setManifestList(mapped);
+    } catch (err: unknown) {
+      console.error("Gagal memuat manifest dari Supabase:", err);
+    } finally {
+      setIsLoading(false);
     }
-    loadData();
   }, []);
 
-  const handleOpenManifest = (pkg: ManifestPackage) => {
-    setActivePackageForManifest(pkg);
-    // dynamically generate room allocations from registered pilgrims
-    if (pkg.pilgrims.length > 0) {
-      const rooms: RoomGroup[] = [];
-      const chunkSize = 4;
-      for (let i = 0; i < pkg.pilgrims.length; i += chunkSize) {
-        const chunk = pkg.pilgrims.slice(i, i + chunkSize);
-        rooms.push({
-          id: `room-${i}`,
-          roomNumber: `Kamar ${401 + Math.floor(i / chunkSize)}`,
-          type: chunk.length <= 2 ? "Double (2 Bed)" : chunk.length === 3 ? "Triple (3 Bed)" : "Quad (4 Bed)",
-          hotelName: pkg.makkahHotel,
-          pilgrims: chunk,
-        });
-      }
-      setRoomGroups(rooms);
-    } else {
-      setRoomGroups([
-        {
-          id: "r1",
-          roomNumber: "Kamar 401",
-          type: "Quad (4 Bed)",
-          hotelName: pkg.makkahHotel,
-          pilgrims: ["Belum ada jamaah terdaftar"],
-        },
-      ]);
-    }
-  };
-
-  const filteredPackages = packages.filter((p) => {
-    return (
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.departureCity.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.airline.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  });
-
-  const handleSaveManifest = () => {
-    setSaveToast(true);
-    setTimeout(() => {
-      setSaveToast(false);
-      setActivePackageForManifest(null);
-    }, 1500);
-  };
+  React.useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="p-6 md:p-8 space-y-6">
       {/* Header section */}
       <div>
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <Layers className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Manifest &amp; Rooming Hotel
-            </h1>
-            <p className="text-xs text-slate-400">
-              Pilih paket keberangkatan untuk mengatur penempatan kamar hotel, bus jemputan, dan nomor kursi jamaah.
-            </p>
-          </div>
-        </div>
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+          <span>Beranda</span>
+          <span>&gt;</span>
+          <span className="text-gray-900 font-medium">Manifest</span>
+        </nav>
+        <h1 className="text-2xl font-bold text-gray-900">Manifest &amp; Rooming</h1>
+        <p className="text-sm text-gray-500">
+          Pengaturan kamar, bus, dan kursi jamaah per paket
+        </p>
       </div>
 
-      {/* Search Bar */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex items-center gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Cari nama paket keberangkatan..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
-          />
-        </div>
-
-        <button className="rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 px-4 py-1.5 text-xs font-semibold transition">
-          Cari
-        </button>
-      </div>
-
-      {/* Table Data */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+      {/* Tabel */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                <th className="pb-3.5 font-bold">PAKET PERJALANAN</th>
-                <th className="pb-3.5 font-bold">KEBERANGKATAN</th>
-                <th className="pb-3.5 font-bold">AKOMODASI HOTEL</th>
-                <th className="pb-3.5 font-bold">MASKAPAI</th>
-                <th className="pb-3.5 font-bold">JAMAAH TERDAFTAR</th>
-                <th className="pb-3.5 font-bold text-center">AKSI</th>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PAKET
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JENIS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JUMLAH JAMAAH
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  BERANGKAT
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredPackages.map((pkg) => (
-                <tr key={pkg.id} className="hover:bg-slate-50/70 transition">
-                  {/* Paket Perjalanan */}
-                  <td className="py-3.5 pr-4 max-w-xs">
-                    <p className="font-semibold text-slate-900">{pkg.name}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {pkg.branch} • {pkg.category}
-                    </p>
+            <tbody className="divide-y divide-gray-100">
+              {manifestList.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Paket */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.paket}
                   </td>
 
-                  {/* Keberangkatan */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5 text-slate-800 font-medium">
-                      <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{pkg.departureDate}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Dari: {pkg.departureCity}
-                    </p>
-                  </td>
-
-                  {/* Akomodasi Hotel */}
-                  <td className="py-3.5 pr-4 max-w-xs">
-                    <div className="flex items-center gap-1.5 text-slate-800">
-                      <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                      <span className="truncate">{pkg.makkahHotel}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
-                      <Building2 className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                      <span className="truncate">{pkg.madinahHotel}</span>
-                    </div>
-                  </td>
-
-                  {/* Maskapai */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5 text-slate-800">
-                      <Plane className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{pkg.airline}</span>
-                    </div>
-                  </td>
-
-                  {/* Jamaah Terdaftar */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap font-medium text-slate-800">
-                    <div className="flex items-center gap-1.5">
-                      <Users className="h-3.5 w-3.5 text-slate-400" />
-                      <span>
-                        {pkg.registeredCount} / {pkg.quotaCount} Jamaah
+                  {/* Jenis */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {item.jenis === "Umroh" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        Umroh
                       </span>
-                    </div>
+                    )}
+                    {item.jenis === "Haji" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                        Haji
+                      </span>
+                    )}
+                    {item.jenis === "Haji Plus" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                        Haji Plus
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Jumlah Jamaah */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.jumlahJamaah}
+                  </td>
+
+                  {/* Berangkat */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    {item.berangkat}
                   </td>
 
                   {/* Aksi */}
-                  <td className="py-3.5 text-center whitespace-nowrap">
-                    <button
-                      onClick={() => handleOpenManifest(pkg)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/50 text-slate-700 hover:text-emerald-800 px-3 py-1.5 text-xs font-semibold transition shadow-sm active:scale-95"
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <Link
+                      href={`/manifest/${item.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
                     >
-                      <span>Atur Manifest</span>
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
+                      <Layers className="h-3.5 w-3.5" />
+                      <span>Kelola Manifest</span>
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -261,118 +195,159 @@ export default function ManifestRoomingPage() {
         </div>
       </div>
 
-      {/* Modal Atur Manifest & Rooming (100% Fungsional) */}
-      {activePackageForManifest && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in-50">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+      {/* Modal Kelola Manifest */}
+      {selectedManifest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden border border-gray-200">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Pengaturan Manifest &amp; Rooming List
+                <h3 className="text-lg font-bold text-gray-900">
+                  Kelola Manifest &amp; Rooming
                 </h3>
-                <p className="text-[11px] text-slate-400">
-                  {activePackageForManifest.name} ({activePackageForManifest.airline})
+                <p className="text-xs text-gray-500">
+                  {selectedManifest.paket} &bull; Keberangkatan {selectedManifest.berangkat}
                 </p>
               </div>
               <button
-                onClick={() => setActivePackageForManifest(null)}
-                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setSelectedManifest(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Bus Assignment selector */}
-            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <Bus className="h-5 w-5 text-emerald-700" />
-                <div>
-                  <span className="font-bold text-slate-900 block">Armada Bus Bandara &amp; Ziarah</span>
-                  <span className="text-[11px] text-slate-400">Kapasitas 45 Kursi dengan AC &amp; Bagasi Luas</span>
-                </div>
-              </div>
-              <select
-                value={selectedBus}
-                onChange={(e) => setSelectedBus(e.target.value)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 focus:outline-none font-medium"
+            {/* Tabs */}
+            <div className="flex border-b border-gray-100 px-6 pt-3 gap-6 text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => setModalTab("rooms")}
+                className={`pb-3 border-b-2 transition flex items-center gap-2 ${
+                  modalTab === "rooms"
+                    ? "border-teal-600 text-teal-700 font-semibold"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
               >
-                <option>Bus 01 (Executive SAPTCO)</option>
-                <option>Bus 02 (VIP Qawafil)</option>
-              </select>
+                <BedDouble className="h-4 w-4" />
+                <span>Rooming Hotel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTab("bus")}
+                className={`pb-3 border-b-2 transition flex items-center gap-2 ${
+                  modalTab === "bus"
+                    ? "border-teal-600 text-teal-700 font-semibold"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <Bus className="h-4 w-4" />
+                <span>Plotting Bus &amp; Kursi</span>
+              </button>
             </div>
 
-            {/* Rooming Hotel Cards */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-800 text-xs uppercase tracking-wider">
-                  Penempatan Kamar Hotel ({activePackageForManifest.makkahHotel})
-                </span>
-                <span className="text-[11px] text-emerald-700 font-semibold">
-                  Muthawif Pembimbing: Ustadz Abdullah
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
-                {roomGroups.map((room) => (
-                  <div
-                    key={room.id}
-                    className="rounded-xl border border-slate-200 p-3.5 bg-white space-y-2"
-                  >
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                        <BedDouble className="h-4 w-4 text-emerald-600" />
-                        <span>{room.roomNumber}</span>
-                      </div>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        {room.type}
+            {/* Modal Body */}
+            <div className="p-6 max-h-96 overflow-y-auto space-y-4">
+              {modalTab === "rooms" ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <div>
+                      <span className="text-gray-500 block">Hotel Makkah:</span>
+                      <span className="font-semibold text-gray-900">
+                        {selectedManifest.makkahHotel || "-"}
                       </span>
                     </div>
-
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Daftar Penghuni:
+                    <div>
+                      <span className="text-gray-500 block">Hotel Madinah:</span>
+                      <span className="font-semibold text-gray-900">
+                        {selectedManifest.madinahHotel || "-"}
                       </span>
-                      {room.pilgrims.map((name, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-50 text-slate-700"
-                        >
-                          <span className="font-medium">{name}</span>
-                          <span className="text-[10px] text-slate-400">Kasur {idx + 1}</span>
-                        </div>
-                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                        Alokasi Kamar Jamaah
+                      </span>
+                    </div>
+
+                    {(selectedManifest.rooms || []).length === 0 && (
+                      <p className="text-xs text-gray-500">
+                        Belum ada jamaah terdaftar pada paket ini.
+                      </p>
+                    )}
+
+                    {(selectedManifest.rooms || []).map((room, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 border border-gray-200 rounded-lg bg-white space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-sm text-gray-900">
+                            {room.roomNo}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                            {room.type}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          <span className="font-medium text-gray-500">Penghuni: </span>
+                          <span>{room.jamaahList.join(", ")}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 border border-teal-100 bg-teal-50 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-teal-900">
+                        Armada: {selectedManifest.bus || "-"}
+                      </span>
+                      <span className="text-xs font-semibold text-teal-700">
+                        {selectedManifest.jumlahJamaah} Jamaah
+                      </span>
+                    </div>
+                    <p className="text-xs text-teal-800">
+                      Data armada bus &amp; kursi belum tersimpan di database.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase text-gray-500">
+                      Pilih Armada Bus
+                    </label>
+                    <select
+                      disabled
+                      className="w-full rounded-lg border border-gray-300 p-2 text-xs bg-gray-50 text-gray-500 focus:outline-none"
+                    >
+                      <option value="">Belum ada data armada</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              {saveToast ? (
-                <span className="inline-flex items-center gap-1.5 text-emerald-700 font-bold text-xs">
-                  <Check className="h-4 w-4" /> Manifest dan Rooming List Berhasil Disimpan!
-                </span>
-              ) : (
-                <span className="text-[11px] text-slate-400">
-                  Data otomatis sinkron dengan koordinator logistik di Makkah &amp; Madinah.
-                </span>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setActivePackageForManifest(null)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  Tutup
-                </button>
-                <button
-                  onClick={handleSaveManifest}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm active:scale-95"
-                >
-                  Simpan Manifest
-                </button>
-              </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() =>
+                  alert("Export manifest belum tersedia: belum ada fungsi generator berkas Excel/PDF di service.")
+                }
+                className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 font-medium"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Export Manifest (.xlsx)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedManifest(null)}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+              >
+                Selesai
+              </button>
             </div>
           </div>
         </div>

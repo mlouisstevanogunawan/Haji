@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSnapTransaction } from "@/lib/midtrans/server";
 import { MidtransSnapRequest } from "@/lib/midtrans/types";
 import { getMidtransAmount, buildSnapCallbacks } from "@/lib/midtrans/config";
+import { requireSession } from "@/lib/api/session";
 
 export async function POST(req: NextRequest) {
   try {
+    // Transaksi hanya dibuat atas nama sesi login; webhook Midtrans tetap publik
+    // karena diverifikasi lewat signature server-to-server.
+    if (!(await requireSession(req))) {
+      return NextResponse.json(
+        { error: "Sesi tidak valid. Silakan login terlebih dahulu." },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
 
     const {

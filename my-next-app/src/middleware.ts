@@ -1,56 +1,72 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
+import { isStaffRole } from "@/lib/auth/roles";
+
+/**
+ * Halaman tanpa login. Selain dari daftar ini, setiap route halaman butuh sesi
+ * Supabase Auth yang valid.
+ */
+const PUBLIC_PAGES = [
+  "/",
+  "/login",
+  "/auth/callback",
+  "/pembayaran-sukses",
+  "/pembayaran-pending",
+  "/pembayaran-gagal",
+];
+
+/**
+ * Area khusus staf. Jamaah/agen/muthawif yang membuka alamat ini dikirim kembali
+ * ke dashboard peran mereka sendiri.
+ */
+const STAFF_ONLY_PATHS = [
+  "/super-admin",
+  "/admin",
+  "/pengguna",
+  "/users",
+  "/activity-logs",
+  "/dashboard/users",
+  "/dashboard/activity-logs",
+  "/kelola-cabang",
+  "/cabang",
+  "/pengaturan-sistem",
+  "/white-label",
+  "/rekening-bank",
+  "/bank",
+  "/tagihan-kasir",
+  "/komisi-agen",
+];
+
+function matches(pathname: string, list: string[]): boolean {
+  return list.some((path) => pathname === path || pathname.startsWith(path + "/"));
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Run Supabase session sync and get authentication status
-  const { supabaseResponse, isAuthenticated } = await updateSession(request);
+  // Route handler API memeriksa dan memperbarui sesinya sendiri (requireSession)
+  // supaya kegagalan membalas JSON 401, bukan redirect HTML.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
 
-  // Check if route is part of protected dashboard
-  const isDashboardPath =
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/students") ||
-    pathname.startsWith("/tasks") ||
-    pathname.startsWith("/reports") ||
-    pathname.startsWith("/referral") ||
-    pathname.startsWith("/pendaftaran") ||
-    pathname.startsWith("/komisi") ||
-    pathname.startsWith("/paket") ||
-    pathname.startsWith("/hotels") ||
-    pathname.startsWith("/hotel") ||
-    pathname.startsWith("/airlines") ||
-    pathname.startsWith("/maskapai") ||
-    pathname.startsWith("/rekening-bank") ||
-    pathname.startsWith("/bank") ||
-    pathname.startsWith("/mitra-agen") ||
-    pathname.startsWith("/muthawif") ||
-    pathname.startsWith("/data-jamaah") ||
-    pathname.startsWith("/dokumen-paspor") ||
-    pathname.startsWith("/tagihan-kasir") ||
-    pathname.startsWith("/perlengkapan") ||
-    pathname.startsWith("/perlengkapan-jamaah") ||
-    pathname.startsWith("/equipment") ||
-    pathname.startsWith("/billing") ||
-    pathname.startsWith("/payments") ||
-    pathname.startsWith("/pengumuman") ||
-    pathname.startsWith("/announcements") ||
-    pathname.startsWith("/jamaah-bimbingan") ||
-    pathname.startsWith("/manasik") ||
-    pathname.startsWith("/manifest");
+  const { supabaseResponse, session } = await updateSession(request);
 
-  const isAuthPath = pathname.startsWith("/login");
+  if (matches(pathname, PUBLIC_PAGES)) {
+    if (session && pathname === "/login") {
+      return NextResponse.redirect(new URL(session.homePath, request.url));
+    }
+    return supabaseResponse;
+  }
 
-  // Protect dashboard routes: redirect to login if unauthenticated
-  if (isDashboardPath && !isAuthenticated) {
+  if (!session) {
     const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("redirect", pathname);
+    redirectUrl.searchParams.set("redirect", pathname + request.nextUrl.search);
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Redirect to dashboard if already authenticated and accessing login
-  if (isAuthPath && isAuthenticated) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (matches(pathname, STAFF_ONLY_PATHS) && !isStaffRole(session.role)) {
+    return NextResponse.redirect(new URL(session.homePath, request.url));
   }
 
   return supabaseResponse;
@@ -63,9 +79,7 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico, images, icons, svg (public static assets)
-     * - api routes (e.g. /api/health)
-     * - auth callback (handled by app/auth/callback/route.ts)
      */
-    "/((?!_next/static|_next/image|favicon.ico|images|icons|fonts|api/health|auth/callback).*)",
+    "/((?!_next/static|_next/image|favicon.ico|images|icons|fonts).*)",
   ],
 };

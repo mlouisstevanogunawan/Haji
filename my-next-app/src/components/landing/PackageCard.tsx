@@ -34,9 +34,11 @@ export const PackageCard: React.FC<PackageCardProps> = ({ pkg }) => {
         {/* Bottom Row of Header: Mulai dari & Yellow Badge */}
         <div className="mt-4 flex items-center justify-between gap-2">
           <span className="text-xs text-white/80">Mulai dari</span>
-          <span className="bg-amber-400 text-slate-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">
-            {pkg.badge}
-          </span>
+          {pkg.badge && (
+            <span className="bg-amber-400 text-slate-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">
+              {pkg.badge}
+            </span>
+          )}
         </div>
 
         {/* Large Price Display */}
@@ -63,11 +65,11 @@ export const PackageCard: React.FC<PackageCardProps> = ({ pkg }) => {
           </div>
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>Mekah: {pkg.hotelMekah}</span>
+            <span>Mekah: {pkg.hotelMekah ?? "Belum dicantumkan"}</span>
           </div>
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>Madinah: {pkg.hotelMadinah}</span>
+            <span>Madinah: {pkg.hotelMadinah ?? "Belum dicantumkan"}</span>
           </div>
         </div>
 

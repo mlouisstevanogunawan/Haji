@@ -1,21 +1,23 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useRole } from "@/context/RoleContext";
 import {
-  Calendar,
-  Clock,
-  MapPin,
-  UserCheck,
   Plus,
-  Search,
+  Calendar,
+  UserCheck,
   Edit2,
   Trash2,
   X,
-  Check,
+  CheckCircle2,
+  Clock,
+  MapPin,
 } from "lucide-react";
-
 import {
   getManasikSessions,
+  getAttendanceBySession,
   createManasikSession,
   deleteManasikSession,
   ensureSessionAttendance,
@@ -23,66 +25,161 @@ import {
   ManasikSessionRecord,
   ManasikAttendanceRecord,
 } from "@/services/manasikService";
+import { getPackages, PackageRow } from "@/services/packageService";
+import { getGuides, GuideRow } from "@/services/guideService";
+import { dbRead, dbUpdate } from "@/lib/db/write";
 
-interface ManasikSession {
+interface ManasikSessionItem {
   id: string;
-  title: string;
-  packageName: string;
-  date: string;
-  time: string;
-  location: string;
-  notes: string;
-  muthawif: string;
-  hadirCount: number;
+  tanggal: string;
+  judul: string;
+  paket: string;
+  paketId: string | null;
+  pembimbing: string;
+  pembimbingId: string | null;
+  kehadiranHadir: number;
+  kehadiranTotal: number;
+  waktu?: string;
+  lokasi?: string;
 }
 
-interface PilgrimAttendance {
+interface PilgrimAttendanceItem {
   id: string;
   name: string;
   nik: string;
   status: "Hadir" | "Izin" | "Sakit" | "Alpa";
 }
 
-function mapRecordToSession(r: ManasikSessionRecord): ManasikSession {
-  return {
+function mapAttendance(records: ManasikAttendanceRecord[]): PilgrimAttendanceItem[] {
+  return records.map((r) => ({
     id: r.id,
-    title: r.title,
-    packageName: r.package_name || "Umroh Reguler",
-    date: r.session_date,
-    time: r.session_time,
-    location: r.location,
-    notes: r.notes || "Bimbingan Ibadah",
-    muthawif: r.muthawif_name || "Ustadz Pembimbing",
-    hadirCount: 0,
-  };
+    name: r.pilgrim_name,
+    nik: r.nik || "-",
+    status: r.status === "Hadir" || r.status === "Izin" || r.status === "Sakit" || r.status === "Alpa"
+      ? r.status
+      : "Alpa",
+  }));
 }
 
-export default function ManasikAbsensiPage() {
-  const [sessions, setSessions] = React.useState<ManasikSession[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [searchTerm, setSearchTerm] = React.useState("");
+export default function ManasikPage() {
+  const { role, userId } = useRole();
+  const pathname = usePathname();
+  const isJamaah = role === "jamaah_umroh" || pathname.startsWith("/jamaah");
+  const isMuthawif = role === "muthawif" || pathname.startsWith("/muthawif");
 
-  // Modal Attendance
-  const [activeSessionForAbsen, setActiveSessionForAbsen] = React.useState<ManasikSession | null>(null);
-  const [attendanceList, setAttendanceList] = React.useState<PilgrimAttendance[]>([]);
-  const [isLoadingAttendance, setIsLoadingAttendance] = React.useState(false);
+  const [sessions, setSessions] = React.useState<ManasikSessionItem[]>([]);
+  const [packages, setPackages] = React.useState<PackageRow[]>([]);
+  const [guides, setGuides] = React.useState<GuideRow[]>([]);
+  const [jamaahPackageIds, setJamaahPackageIds] = React.useState<string[]>([]);
+  const [, setIsLoading] = React.useState(true);
 
-  // Modal Add Session
-  const [showAddModal, setShowAddModal] = React.useState(false);
-  const [newTitle, setNewTitle] = React.useState("");
-  const [newPackage, setNewPackage] = React.useState("Umroh Reguler Syawal 1447H (9 Hari)");
-  const [newDate, setNewDate] = React.useState("22 Okt 2026");
-  const [newTime, setNewTime] = React.useState("08:30 WIB");
-  const [newLocation, setNewLocation] = React.useState("Grand Ballroom Hotel Aston Jakarta");
+  // Jamaah: jadwal manasik yang relevan adalah milik paket yang ia booking.
+  React.useEffect(() => {
+    if (!isJamaah) return;
+    let cancelled = false;
+    dbRead<{ package_id: string | null }>("bookings", {
+      select: "package_id",
+      eq: { pilgrim_id: userId },
+    })
+      .then((rows) => {
+        if (!cancelled) {
+          setJamaahPackageIds(
+            Array.from(new Set(rows.map((r) => r.package_id).filter((id): id is string => Boolean(id))))
+          );
+        }
+      })
+      .catch((err) => console.error("Gagal memuat paket jamaah:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [isJamaah, userId]);
+
+  // Muthawif: hanya sesi yang penugasan pembimbingnya menunjuk guide miliknya.
+  const myGuideIds = React.useMemo(
+    () =>
+      isMuthawif
+        ? guides
+            .filter((g) => (g as { user_id?: string | null }).user_id === userId)
+            .map((g) => g.id)
+        : [],
+    [isMuthawif, guides, userId]
+  );
+
+  const displayedSessions = isJamaah
+    ? sessions.filter((s) => s.paketId && jamaahPackageIds.includes(s.paketId))
+    : isMuthawif
+    ? sessions.filter((s) => s.pembimbingId && myGuideIds.includes(s.pembimbingId))
+    : sessions;
+
+  // Modals
+  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [editSession, setEditSession] = React.useState<ManasikSessionItem | null>(null);
+  const [activeAttendanceSession, setActiveAttendanceSession] =
+    React.useState<ManasikSessionItem | null>(null);
+  const [attendanceList, setAttendanceList] = React.useState<PilgrimAttendanceItem[]>([]);
+  const [isAttendanceLoading, setIsAttendanceLoading] = React.useState(false);
+
+  // Form New Session
+  const [newJudul, setNewJudul] = React.useState("");
+  const [newPaket, setNewPaket] = React.useState("");
+  const [newTanggal, setNewTanggal] = React.useState(
+    new Date().toISOString().split("T")[0]
+  );
+  const [newPembimbing, setNewPembimbing] = React.useState("");
+  const [newWaktu, setNewWaktu] = React.useState("");
+  const [newLokasi, setNewLokasi] = React.useState("");
 
   const loadSessions = React.useCallback(async () => {
     setIsLoading(true);
     try {
-      const records = await getManasikSessions();
-      setSessions(records.map(mapRecordToSession));
+      const [records, allAttendance, pkgs, gds] = await Promise.all([
+        getManasikSessions(),
+        dbRead<{ session_id: string; status: string }>("manasik_attendance", {
+          select: "session_id, status",
+        }).catch(() => [] as { session_id: string; status: string }[]),
+        getPackages().catch(() => []),
+        getGuides().catch(() => []),
+      ]);
+
+      // Hitung kehadiran per sesi dari tabel manasik_attendance yang asli.
+      const counts = new Map<string, { hadir: number; total: number }>();
+      allAttendance.forEach((a) => {
+        const prev = counts.get(a.session_id) || { hadir: 0, total: 0 };
+        counts.set(a.session_id, {
+          hadir: prev.hadir + (a.status === "Hadir" ? 1 : 0),
+          total: prev.total + 1,
+        });
+      });
+
+      const mapped: ManasikSessionItem[] = (records || []).map((r) => {
+        let formattedDate = r.session_date;
+        try {
+          formattedDate = new Date(r.session_date).toLocaleDateString("id-ID", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          });
+        } catch {}
+        return {
+          id: r.id,
+          tanggal: formattedDate,
+          judul: r.title,
+          paket: r.package_name || "-",
+          paketId: r.package_id ?? null,
+          pembimbing: r.muthawif_name || "-",
+          pembimbingId: r.muthawif_id ?? null,
+          kehadiranHadir: counts.get(r.id)?.hadir ?? 0,
+          kehadiranTotal: counts.get(r.id)?.total ?? 0,
+          waktu: r.session_time || "-",
+          lokasi: r.location || "-",
+        };
+      });
+      setSessions(mapped);
+      setPackages(pkgs || []);
+      setGuides(gds || []);
     } catch (err: unknown) {
-      console.error("Gagal memuat manasik sessions:", err);
-      setSessions([]);
+      console.error("Gagal memuat manasik:", err);
+      alert(`Gagal memuat jadwal manasik: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
@@ -92,224 +189,241 @@ export default function ManasikAbsensiPage() {
     loadSessions();
   }, [loadSessions]);
 
-  const filteredSessions = sessions.filter((s) => {
-    return (
-      s.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.packageName.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  });
-
-  const handleOpenAttendance = async (session: ManasikSession) => {
-    setActiveSessionForAbsen(session);
-    setIsLoadingAttendance(true);
-    try {
-      const atts = await ensureSessionAttendance(session.id);
-      setAttendanceList(
-        atts.map((a) => ({
-          id: a.id,
-          name: a.pilgrim_name,
-          nik: a.nik || "-",
-          status: a.status,
-        }))
-      );
-    } catch (err) {
-      console.error("Gagal memuat presensi manasik:", err);
-      setAttendanceList([]);
-    } finally {
-      setIsLoadingAttendance(false);
-    }
-  };
-
-  const handleUpdateStatus = async (attendanceId: string, newStatus: "Hadir" | "Izin" | "Sakit" | "Alpa") => {
-    // optimistic update
-    setAttendanceList((prev) =>
-      prev.map((p) => (p.id === attendanceId ? { ...p, status: newStatus } : p))
-    );
-    try {
-      await updateAttendanceStatus(attendanceId, newStatus);
-    } catch (err) {
-      console.error("Gagal memperbarui status presensi di database:", err);
-    }
-  };
-
-  const handleSaveAttendance = () => {
-    if (!activeSessionForAbsen) return;
-    const hadirTotal = attendanceList.filter((p) => p.status === "Hadir").length;
-
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === activeSessionForAbsen.id ? { ...s, hadirCount: hadirTotal } : s
-      )
-    );
-    setActiveSessionForAbsen(null);
-  };
-
-  const handleCreateSession = async (e: React.FormEvent) => {
+  const handleAddSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle) return;
+    if (!newJudul.trim() || !newPaket || !newLokasi.trim() || !newWaktu.trim()) {
+      alert("Judul, paket, waktu, dan lokasi wajib diisi.");
+      return;
+    }
+
+    const chosenPackage = packages.find((p) => p.name === newPaket);
+    const chosenGuide = guides.find((g) => g.id === newPembimbing);
 
     try {
       await createManasikSession({
-        title: newTitle,
-        package_name: newPackage,
-        session_date: newDate,
-        session_time: newTime,
-        location: newLocation,
-        notes: "Sesi Pembekalan Praktik",
-        muthawif_name: "Ustadz Abdullah",
+        title: newJudul,
+        package_id: chosenPackage?.id ?? null,
+        package_name: chosenPackage?.name ?? null,
+        session_date: newTanggal,
+        session_time: newWaktu,
+        location: newLokasi,
+        muthawif_id: chosenGuide?.id ?? null,
+        muthawif_name: chosenGuide?.name ?? null,
       });
+      setIsAddModalOpen(false);
+      setNewJudul("");
+      setNewWaktu("");
+      setNewLokasi("");
       await loadSessions();
-      setShowAddModal(false);
-      setNewTitle("");
-    } catch (err) {
-      console.error("Gagal membuat jadwal manasik di database:", err);
+      alert("Jadwal manasik berhasil disimpan ke database.");
+    } catch (err: unknown) {
+      console.error("Gagal menambah jadwal manasik:", err);
+      alert(`Gagal menyimpan jadwal manasik: ${(err as Error).message}`);
     }
   };
 
-  const handleDeleteSession = async (id: string) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editSession) return;
+
+    try {
+      await dbUpdate("manasik_sessions", editSession.id, {
+        title: editSession.judul,
+        package_name: editSession.paket,
+        muthawif_name: editSession.pembimbing,
+      });
+      setEditSession(null);
+      await loadSessions();
+      alert("Perubahan jadwal manasik berhasil disimpan.");
+    } catch (err: unknown) {
+      console.error("Gagal memperbarui manasik:", err);
+      alert(`Gagal menyimpan perubahan: ${(err as Error).message}`);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
     if (confirm("Hapus jadwal manasik ini?")) {
       try {
         await deleteManasikSession(id);
         await loadSessions();
-      } catch (err) {
-        console.error("Gagal menghapus jadwal manasik:", err);
+        alert("Jadwal manasik berhasil dihapus.");
+      } catch (err: unknown) {
+        console.error("Gagal menghapus manasik:", err);
+        alert(`Gagal menghapus jadwal manasik: ${(err as Error).message}`);
       }
     }
   };
 
+  const handleOpenAttendance = async (session: ManasikSessionItem) => {
+    setActiveAttendanceSession(session);
+    setAttendanceList([]);
+    setIsAttendanceLoading(true);
+    try {
+      // Ambil daftar hadir asli; bila sesi belum punya baris absensi sama sekali,
+      // ensureSessionAttendance mengisinya dari tabel profiles lalu mengembalikan barisnya.
+      let records = await getAttendanceBySession(session.id);
+      if (records.length === 0) {
+        records = await ensureSessionAttendance(session.id);
+      }
+      setAttendanceList(mapAttendance(records));
+    } catch (err: unknown) {
+      console.error("Gagal memuat daftar absensi:", err);
+      alert(`Gagal memuat daftar absensi: ${(err as Error).message}`);
+    } finally {
+      setIsAttendanceLoading(false);
+    }
+  };
+
+  const handleToggleAttendance = (pilgrimId: string) => {
+    setAttendanceList((prev) =>
+      prev.map((p) => {
+        if (p.id === pilgrimId) {
+          const nextStatus =
+            p.status === "Hadir" ? "Izin" : p.status === "Izin" ? "Alpa" : "Hadir";
+          return { ...p, status: nextStatus };
+        }
+        return p;
+      })
+    );
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!activeAttendanceSession) return;
+
+    try {
+      // Setiap perubahan status ditulis ke manasik_attendance, lalu tabel
+      // di-load ulang dari database (bukan dihitung lokal).
+      for (const item of attendanceList) {
+        await updateAttendanceStatus(item.id, item.status);
+      }
+      setActiveAttendanceSession(null);
+      await loadSessions();
+      alert("Absensi jamaah berhasil disimpan ke database.");
+    } catch (err: unknown) {
+      console.error("Gagal menyimpan absensi:", err);
+      alert(`Gagal menyimpan absensi: ${(err as Error).message}`);
+    }
+  };
+
   return (
-    <div className="space-y-6 pb-12">
+    <div className="p-6 md:p-8 space-y-6">
       {/* Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <Calendar className="h-5 w-5" />
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+            <span>Beranda</span>
+            <span>&gt;</span>
+            <span className="text-gray-900 font-medium">Manasik</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900">Manasik</h1>
+          <p className="text-sm text-gray-500">
+            Jadwal bimbingan manasik &amp; absensi jamaah
+          </p>
+        </div>
+
+        {/* Primary Button */}
+        {!isMuthawif && !isJamaah && (
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Jadwal Bimbingan Manasik
-            </h1>
-            <p className="text-xs text-slate-400">
-              Penjadwalan sesi bimbingan ibadah Umroh/Haji, muthawif pembimbing, dan presensi jamaah.
-            </p>
+            <Link
+              href="/manasik/tambah"
+              className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 rounded-lg transition shadow-sm cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Tambah Jadwal</span>
+            </Link>
           </div>
-        </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-sm transition active:scale-95"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Tambah Jadwal</span>
-        </button>
+        )}
       </div>
 
-      {/* Search Bar */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex items-center gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Cari judul sesi manasik, lokasi pertemuan..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
-          />
-        </div>
-
-        <button className="rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 px-4 py-1.5 text-xs font-semibold transition">
-          Cari
-        </button>
-      </div>
-
-      {/* Table Data */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+      {/* Tabel */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                <th className="pb-3.5 font-bold">SESI &amp; PAKET TERKAIT</th>
-                <th className="pb-3.5 font-bold">TANGGAL &amp; WAKTU</th>
-                <th className="pb-3.5 font-bold">LOKASI PERTEMUAN</th>
-                <th className="pb-3.5 font-bold">PEMBIMBING (MUTHAWIF)</th>
-                <th className="pb-3.5 font-bold">KEHADIRAN</th>
-                <th className="pb-3.5 font-bold text-center">AKSI</th>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  TANGGAL
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JUDUL
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PAKET
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  PEMBIMBING
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  KEHADIRAN
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredSessions.map((session) => (
-                <tr key={session.id} className="hover:bg-slate-50/70 transition">
-                  {/* Sesi & Paket */}
-                  <td className="py-3.5 pr-4 max-w-xs">
-                    <p className="font-semibold text-slate-900">{session.title}</p>
-                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200/60 mt-1">
-                      {session.packageName}
-                    </span>
+            <tbody className="divide-y divide-gray-100">
+              {displayedSessions.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Tanggal */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.tanggal}
                   </td>
 
-                  {/* Tanggal & Waktu */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5 text-slate-800 font-medium">
-                      <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{session.date}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
-                      <Clock className="h-3 w-3 text-slate-400" />
-                      <span>{session.time}</span>
-                    </div>
+                  {/* Judul */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.judul}
                   </td>
 
-                  {/* Lokasi Pertemuan */}
-                  <td className="py-3.5 pr-4 max-w-xs">
-                    <div className="flex items-start gap-1.5 text-slate-800">
-                      <MapPin className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                      <span>{session.location}</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 ml-5 mt-0.5">
-                      {session.notes}
-                    </p>
+                  {/* Paket */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.paket}
                   </td>
 
                   {/* Pembimbing */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <p className="font-medium text-slate-800">{session.muthawif}</p>
-                    <p className="text-[10px] text-slate-400">-</p>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.pembimbing}
                   </td>
 
                   {/* Kehadiran */}
-                  <td className="py-3.5 pr-4 whitespace-nowrap">
-                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200/60">
-                      {session.hadirCount} Hadir
-                    </span>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.kehadiranHadir} / {item.kehadiranTotal}
                   </td>
 
                   {/* Aksi */}
-                  <td className="py-3.5 text-center whitespace-nowrap">
-                    <div className="inline-flex items-center gap-2">
-                      <button
-                        onClick={() => handleOpenAttendance(session)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 px-2.5 py-1 text-[11px] font-semibold transition shadow-sm active:scale-95"
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    {isJamaah || isMuthawif ? (
+                      <Link
+                        href={`/manasik/absensi/${item.id}`}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
                       >
-                        <UserCheck className="h-3.5 w-3.5 text-emerald-700" />
-                        <span>Absensi</span>
-                      </button>
-
-                      <button
-                        title="Edit Sesi"
-                        className="p-1 text-slate-400 hover:text-slate-700 transition"
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => handleDeleteSession(session.id)}
-                        title="Hapus Sesi"
-                        className="p-1 text-slate-400 hover:text-red-600 transition"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                        Absensi
+                      </Link>
+                    ) : (
+                      <div className="inline-flex items-center gap-3">
+                        <Link
+                          href={`/manasik/absensi/${item.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                        >
+                          <UserCheck className="h-3.5 w-3.5" />
+                          <span>Absensi</span>
+                        </Link>
+                        <Link
+                          href={`/manasik/edit/${item.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium transition cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -318,190 +432,298 @@ export default function ManasikAbsensiPage() {
         </div>
       </div>
 
-      {/* Modal Absensi Jamaah (100% Fungsional) */}
-      {activeSessionForAbsen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in-50">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Presensi Kehadiran Jamaah
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  {activeSessionForAbsen.title} ({activeSessionForAbsen.date})
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveSessionForAbsen(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* List of Pilgrims with status toggle */}
-            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
-              {attendanceList.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 hover:bg-slate-50/60 transition"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-900">{p.name}</p>
-                    <p className="font-mono text-[10px] text-slate-400">{p.nik}</p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {(["Hadir", "Izin", "Sakit", "Alpa"] as const).map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => handleUpdateStatus(p.id, st)}
-                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition ${
-                          p.status === st
-                            ? st === "Hadir"
-                              ? "bg-emerald-600 text-white shadow-sm"
-                              : st === "Izin"
-                              ? "bg-amber-500 text-white shadow-sm"
-                              : st === "Sakit"
-                              ? "bg-blue-500 text-white shadow-sm"
-                              : "bg-red-500 text-white shadow-sm"
-                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                        }`}
-                      >
-                        {st}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-[11px] text-slate-500 font-medium">
-                Total Hadir:{" "}
-                <strong className="text-emerald-700">
-                  {attendanceList.filter((p) => p.status === "Hadir").length} / {attendanceList.length}
-                </strong>
-              </span>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setActiveSessionForAbsen(null)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={handleSaveAttendance}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
-                >
-                  Simpan Presensi
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Modal Tambah Jadwal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in-50">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="font-bold text-slate-900 text-sm">
-                Tambah Sesi Manasik Baru
-              </h3>
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Tambah Jadwal Manasik</h3>
               <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
-
-            <form onSubmit={handleCreateSession} className="space-y-3">
+            <form onSubmit={handleAddSession} className="p-6 space-y-4 text-sm">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Judul Sesi Manasik
+                <label className="block font-medium text-gray-700 mb-1">
+                  Judul Sesi <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Contoh: Pemantapan Rukun Haji & Thawaf Wada"
-                  className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Contoh: Manasik Umroh Reguler #1"
+                  value={newJudul}
+                  onChange={(e) => setNewJudul(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Paket Keberangkatan Terkait
+                <label className="block font-medium text-gray-700 mb-1">
+                  Paket <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={newPackage}
-                  onChange={(e) => setNewPackage(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
+                  required
+                  value={newPaket}
+                  onChange={(e) => setNewPaket(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                 >
-                  <option>Umroh Reguler Syawal 1447H (9 Hari)</option>
-                  <option>Umroh Ramadhan Berkah I'tikaf 12 Hari</option>
-                  <option>Haji Khusus Furoda VIP</option>
+                  <option value="">-- Pilih Paket --</option>
+                  {packages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.name}>
+                      {pkg.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Tanggal Pelaksanaan
-                  </label>
-                  <input
-                    type="text"
-                    value={newDate}
-                    onChange={(e) => setNewDate(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Waktu Mulai
-                  </label>
-                  <input
-                    type="text"
-                    value={newTime}
-                    onChange={(e) => setNewTime(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
-                  Lokasi Pertemuan
-                </label>
+                <label className="block font-medium text-gray-700 mb-1">Tanggal</label>
                 <input
-                  type="text"
-                  value={newLocation}
-                  onChange={(e) => setNewLocation(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 focus:outline-none"
+                  type="date"
+                  value={newTanggal}
+                  onChange={(e) => setNewTanggal(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Waktu <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: 08:30 WIB"
+                  value={newWaktu}
+                  onChange={(e) => setNewWaktu(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Lokasi <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Aula Kantor Pusat Jakarta"
+                  value={newLokasi}
+                  onChange={(e) => setNewLokasi(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Pembimbing / Muthawif</label>
+                <select
+                  value={newPembimbing}
+                  onChange={(e) => setNewPembimbing(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="">-- Belum ditentukan --</option>
+                  {guides.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
                 >
                   Simpan Jadwal
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Jadwal */}
+      {editSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Edit Jadwal Manasik</h3>
+              <button
+                onClick={() => setEditSession(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Judul Sesi</label>
+                <input
+                  type="text"
+                  required
+                  value={editSession.judul}
+                  onChange={(e) =>
+                    setEditSession({ ...editSession, judul: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Paket</label>
+                <input
+                  type="text"
+                  value={editSession.paket}
+                  onChange={(e) =>
+                    setEditSession({ ...editSession, paket: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Tanggal</label>
+                <input
+                  type="text"
+                  value={editSession.tanggal}
+                  onChange={(e) =>
+                    setEditSession({ ...editSession, tanggal: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Pembimbing</label>
+                <input
+                  type="text"
+                  value={editSession.pembimbing}
+                  onChange={(e) =>
+                    setEditSession({ ...editSession, pembimbing: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditSession(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Absensi Jamaah */}
+      {activeAttendanceSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">
+                  Absensi Kehadiran Jamaah
+                </h3>
+                <p className="text-xs text-gray-500">
+                  {activeAttendanceSession.judul} &bull; {activeAttendanceSession.tanggal}
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveAttendanceSession(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-lg p-3">
+                <span className="text-sm font-medium text-teal-900">
+                  Total Jamaah Hadir
+                </span>
+                <span className="text-sm font-bold text-teal-800">
+                  {attendanceList.filter((p) => p.status === "Hadir").length} /{" "}
+                  {attendanceList.length} Jamaah
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {isAttendanceLoading && (
+                  <p className="text-sm text-gray-500 py-2">Memuat daftar jamaah dari database...</p>
+                )}
+                {!isAttendanceLoading && attendanceList.length === 0 && (
+                  <p className="text-sm text-gray-500 py-2">
+                    Belum ada data absensi tersimpan untuk sesi ini.
+                  </p>
+                )}
+                {attendanceList.map((pilgrim) => (
+                  <div
+                    key={pilgrim.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{pilgrim.name}</p>
+                      <p className="text-xs text-gray-400">NIK: {pilgrim.nik}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAttendance(pilgrim.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition ${
+                        pilgrim.status === "Hadir"
+                          ? "bg-green-100 text-green-700"
+                          : pilgrim.status === "Izin"
+                          ? "bg-yellow-100 text-yellow-700"
+                          : "bg-red-100 text-red-700"
+                      }`}
+                    >
+                      {pilgrim.status}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-gray-400">
+                Klik tombol status pada setiap jamaah untuk mengubah kehadiran (Hadir &rarr; Izin &rarr; Alpa).
+              </p>
+            </div>
+
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveAttendanceSession(null)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-100 transition"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAttendance}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+              >
+                Simpan Absensi
+              </button>
+            </div>
           </div>
         </div>
       )}

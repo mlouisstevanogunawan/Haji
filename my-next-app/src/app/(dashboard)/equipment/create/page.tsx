@@ -3,10 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Box, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Box } from "lucide-react";
 
-import { getJamaahList, JamaahProfile } from "@/services/jamaahService";
-import { createEquipment } from "@/services/equipmentService";
+import { getJamaahList } from "@/services/jamaahService";
+import { createEquipmentAssignment } from "@/services/equipmentService";
 
 export interface PilgrimOption {
   id: string;
@@ -36,8 +36,12 @@ export default function CatatPerlengkapanBaruPage() {
   const [qty, setQty] = React.useState<number>(1);
   const [status, setStatus] = React.useState<string>("Belum Diserahkan (Pending)");
   const [isSubmitting, setIsSubmitting] = React.useState<boolean>(false);
-  const [successToast, setSuccessToast] = React.useState<boolean>(false);
-  const [errorToast, setErrorToast] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  const showToast = (kind: "error" | "success", text: string) => {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 4500);
+  };
 
   React.useEffect(() => {
     async function loadPilgrims() {
@@ -63,46 +67,45 @@ export default function CatatPerlengkapanBaruPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    setErrorToast(null);
 
     const pilgrim = pilgrims.find((p) => p.id === selectedPilgrimId);
-    const pilgrimName = pilgrim ? pilgrim.name : "Jamaah";
-    const regCode = pilgrim ? pilgrim.regCode : "REG-000000";
-    const packageName = pilgrim ? pilgrim.packageName : "Umroh Reguler";
+    if (!pilgrim) {
+      showToast("error", "Jamaah penerima wajib dipilih.");
+      return;
+    }
+    const itemName = selectedItem.trim();
+    if (!itemName) {
+      showToast("error", "Item perlengkapan wajib diisi.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const isDelivered = status === "Sudah Diserahkan";
 
     try {
-      const categoryPayload = `${pilgrimName} | ${regCode} | ${packageName} | Diambil di Kantor | - | ${selectedItem}`;
-      const conditionPayload = status === "Sudah Diserahkan" ? ("good" as const) : ("damaged" as const);
-
-      await createEquipment({
-        name: selectedItem,
-        category: categoryPayload,
+      await createEquipmentAssignment({
+        pilgrim_id: pilgrim.id,
+        pilgrim_name: pilgrim.name,
+        item_name: itemName,
         quantity: qty,
-        condition: conditionPayload,
+        condition: "good",
+        size: null,
+        is_delivered: isDelivered,
+        delivered_at: null,
+        notes: null,
       });
 
-      setSuccessToast(true);
-      setTimeout(() => {
-        router.push("/perlengkapan");
-      }, 1200);
+      showToast("success", "Penyerahan perlengkapan berhasil disimpan ke Supabase.");
+      setTimeout(() => router.push("/perlengkapan"), 700);
     } catch (err: unknown) {
       console.error("Gagal menyimpan perlengkapan ke Supabase:", err);
-      setErrorToast("Gagal menyimpan penyerahan ke database Supabase.");
+      showToast("error", `Gagal menyimpan penyerahan: ${(err as Error).message}`);
       setIsSubmitting(false);
     }
   };
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in max-w-4xl">
-      {/* Toast Notifikasi Sukses */}
-      {successToast && (
-        <div className="fixed top-20 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-800 text-white px-4 py-3 text-xs font-medium shadow-xl animate-fade-in">
-          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-          <span>Perlengkapan jamaah berhasil dicatat! Mengalihkan...</span>
-        </div>
-      )}
-
       {/* Header Form matching Screenshot 1 */}
       <div className="flex items-center gap-3">
         <Link
@@ -130,6 +133,18 @@ export default function CatatPerlengkapanBaruPage() {
       {/* Main Form Card matching Screenshot 1 */}
       <div className="max-w-2xl rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-7 shadow-xs">
         <form onSubmit={handleSubmit} className="space-y-5 text-xs">
+          {notice && (
+            <div
+              role="status"
+              className={`rounded-xl border px-3.5 py-2.5 text-xs ${
+                notice.kind === "error"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}
+            >
+              {notice.text}
+            </div>
+          )}
           {/* JAMAAH PENERIMA * */}
           <div>
             <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">

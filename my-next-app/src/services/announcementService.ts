@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type AnnouncementRow = Database["public"]["Tables"]["announcements"]["Row"];
@@ -44,46 +45,13 @@ export async function getAnnouncementById(id: string): Promise<AnnouncementRow |
 }
 
 export async function createAnnouncement(payload: AnnouncementInsert): Promise<AnnouncementRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("announcements")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating announcement:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<AnnouncementRow>("announcements", { ...payload });
 }
 
 export async function updateAnnouncement(id: string, payload: AnnouncementUpdate): Promise<AnnouncementRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("announcements")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating announcement:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<AnnouncementRow>("announcements", id, { ...payload });
 }
 
 export async function deleteAnnouncement(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("announcements").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting announcement:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("announcements", id);
 }

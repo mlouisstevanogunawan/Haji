@@ -1,1 +1,1 @@
-export { default } from "../hotels/page";
+export { default } from "../super-admin/hotel/page";

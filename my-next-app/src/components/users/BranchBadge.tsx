@@ -7,7 +7,7 @@ interface BranchBadgeProps {
 }
 
 export const BranchBadge: React.FC<BranchBadgeProps> = ({ branchName, className }) => {
-  const display = branchName || "Kantor Pusat Jakarta";
+  const display = branchName || "—";
 
   return (
     <span

@@ -3,537 +3,523 @@
 import * as React from "react";
 import Link from "next/link";
 import {
-  Package,
   Plus,
-  Search,
-  ChevronDown,
-  Luggage,
-  CheckCircle2,
-  X,
   Edit2,
   Trash2,
-  Calendar,
-  Truck,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Package,
 } from "lucide-react";
-
 import {
-  getEquipment,
-  createEquipment,
-  updateEquipment,
-  deleteEquipment,
-  EquipmentRow,
+  getEquipmentAssignments,
+  createEquipmentAssignment,
+  updateEquipmentAssignment,
+  deleteEquipmentAssignment,
+  EquipmentAssignmentRow,
 } from "@/services/equipmentService";
 
-export interface DistributionItem {
+interface EquipmentItem {
   id: string;
-  pilgrimName: string;
-  bookingCode: string;
-  packageName: string;
-  items: string[];
-  distributedDate: string;
-  method: "Diambil di Kantor" | "Dikirim Ekspedisi";
-  courierReceipt?: string;
-  status: "Lengkap" | "Sebagian";
+  pilgrimId: string | null;
+  jamaah: string;
+  item: string;
+  ukuran: string | null;
+  qty: number;
+  isDelivered: boolean;
+  status: "Sudah Diserahkan" | "Belum Diserahkan";
+  diserahkan: string | null;
+  notes: string | null;
 }
 
-function mapEquipmentRowToDistribution(row: EquipmentRow): DistributionItem {
-  let pilgrimName = "Jamaah";
-  let bookingCode = "REG-" + row.id.slice(0, 6).toUpperCase();
-  let packageName = "Umroh Reguler";
-  let method: "Diambil di Kantor" | "Dikirim Ekspedisi" = "Diambil di Kantor";
-  let courierReceipt = "";
-  let items = [row.name];
-
-  if (row.category && row.category.includes("|")) {
-    const parts = row.category.split("|").map((s) => s.trim());
-    if (parts[0]) pilgrimName = parts[0];
-    if (parts[1]) bookingCode = parts[1];
-    if (parts[2]) packageName = parts[2];
-    if (parts[3] === "Dikirim Ekspedisi") method = "Dikirim Ekspedisi";
-    if (parts[4]) courierReceipt = parts[4];
-    if (parts[5]) items = parts[5].split(";").filter(Boolean);
-  }
-
-  let dateFormatted = row.created_at;
-  try {
-    dateFormatted = new Date(row.created_at).toLocaleDateString("id-ID", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {}
-
-  return {
-    id: row.id,
-    pilgrimName,
-    bookingCode,
-    packageName,
-    items: items.length > 0 ? items : [row.name],
-    distributedDate: dateFormatted,
-    method,
-    courierReceipt,
-    status: row.condition === "good" ? "Lengkap" : "Sebagian",
-  };
+function deliveredToStatus(isDelivered: boolean): EquipmentItem["status"] {
+  return isDelivered ? "Sudah Diserahkan" : "Belum Diserahkan";
 }
 
-export default function PerlengkapanJamaahPage() {
-  const [distributions, setDistributions] = React.useState<DistributionItem[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [searchQuery, setSearchQuery] = React.useState("");
-  const [appliedSearch, setAppliedSearch] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState("Semua Status");
+function formatTanggal(value: string | null | undefined): string {
+  if (!value) return "-";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "-";
+  return dt.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = React.useState<boolean>(false);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-
-  // Form Fields
-  const [formPilgrimName, setFormPilgrimName] = React.useState("");
-  const [formBookingCode, setFormBookingCode] = React.useState("REG-202611-002");
-  const [formPackageName, setFormPackageName] = React.useState("Umroh Reguler Syawal 1447H");
-  const [selectedItems, setSelectedItems] = React.useState<string[]>([
-    "Koper Bagasi 24\"",
-    "Tas Paspor / Selempang",
-    "Bahan Seragam Batik",
-  ]);
-  const [formMethod, setFormMethod] = React.useState<"Diambil di Kantor" | "Dikirim Ekspedisi">("Diambil di Kantor");
-  const [formCourierReceipt, setFormCourierReceipt] = React.useState("");
-  const [formDate, setFormDate] = React.useState("10 Okt 2026");
-
-  // Toast
+export default function PerlengkapanPage() {
+  const [items, setItems] = React.useState<EquipmentItem[]>([]);
+  const [, setIsLoading] = React.useState(true);
   const [toastMessage, setToastMessage] = React.useState<string | null>(null);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const itemsPerPage = 15;
 
-  const loadDistributions = React.useCallback(async () => {
+  // Modals
+  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [editItem, setEditItem] = React.useState<EquipmentItem | null>(null);
+
+  // Form states
+  const [formJamaah, setFormJamaah] = React.useState("");
+  const [formItem, setFormItem] = React.useState("Koper");
+  const [formQty, setFormQty] = React.useState(1);
+  const [formStatus, setFormStatus] = React.useState<"Sudah Diserahkan" | "Belum Diserahkan">(
+    "Belum Diserahkan"
+  );
+
+  const showToast = React.useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  }, []);
+
+  const loadData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-      const rows = await getEquipment();
-      setDistributions(rows.map(mapEquipmentRowToDistribution));
+      const records = await getEquipmentAssignments();
+      const mapped: EquipmentItem[] = (records || []).map((r: EquipmentAssignmentRow) => ({
+        id: r.id,
+        pilgrimId: r.pilgrim_id ?? null,
+        jamaah: r.pilgrim_name ?? "",
+        item: r.item_name,
+        ukuran: r.size ?? null,
+        qty: r.quantity ?? 0,
+        isDelivered: r.is_delivered,
+        status: deliveredToStatus(r.is_delivered),
+        diserahkan: r.delivered_at ?? null,
+        notes: r.notes ?? null,
+      }));
+      setItems(mapped);
     } catch (err: unknown) {
-      console.error("Gagal memuat perlengkapan dari Supabase:", err);
-      setDistributions([]);
+      console.error("Gagal memuat data perlengkapan:", err);
+      setItems([]);
+      showToast(`Gagal memuat data perlengkapan: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   React.useEffect(() => {
-    loadDistributions();
-  }, [loadDistributions]);
+    loadData();
+  }, [loadData]);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+  const totalResults = items.length;
+  const totalPages = Math.ceil(totalResults / itemsPerPage) || 1;
+  const activePage = Math.min(currentPage, totalPages);
+  const startIndex = (activePage - 1) * itemsPerPage;
+  const paginatedItems = items.slice(startIndex, startIndex + itemsPerPage);
 
-  const allAvailableItems = [
-    "Koper Bagasi 24\"",
-    "Koper Kabin 20\"",
-    "Tas Paspor / Selempang",
-    "Kain Ihram & Sabuk (Pria)",
-    "Mukena & Bergo (Wanita)",
-    "Bahan Seragam Batik",
-    "Buku Doa & ID Card",
-  ];
-
-  const handleToggleItem = (item: string) => {
-    if (selectedItems.includes(item)) {
-      setSelectedItems(selectedItems.filter((i) => i !== item));
-    } else {
-      setSelectedItems([...selectedItems, item]);
-    }
-  };
-
-  const handleOpenAdd = () => {
-    setEditingId(null);
-    setFormPilgrimName("");
-    setFormBookingCode("REG-202611-002");
-    setFormPackageName("Umroh Reguler Syawal 1447H");
-    setSelectedItems([
-      "Koper Bagasi 24\"",
-      "Tas Paspor / Selempang",
-      "Bahan Seragam Batik",
-    ]);
-    setFormMethod("Diambil di Kantor");
-    setFormCourierReceipt("");
-    setFormDate("10 Okt 2026");
-    setIsModalOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPilgrimName.trim()) return;
+    if (!formJamaah.trim() || !formItem.trim()) return;
 
     try {
-      const categoryPayload = `${formPilgrimName.trim()} | ${formBookingCode} | ${formPackageName} | ${formMethod} | ${formCourierReceipt.trim()} | ${selectedItems.join(";")}`;
-      const conditionPayload = selectedItems.length >= 5 ? ("good" as const) : ("damaged" as const);
-
-      if (editingId) {
-        await updateEquipment(editingId, {
-          name: selectedItems.join(", ") || "Perlengkapan Umroh",
-          category: categoryPayload,
-          quantity: selectedItems.length,
-          condition: conditionPayload,
-        });
-        showToast("Data perlengkapan berhasil diperbarui di Supabase!");
-      } else {
-        await createEquipment({
-          name: selectedItems.join(", ") || "Perlengkapan Umroh",
-          category: categoryPayload,
-          quantity: selectedItems.length,
-          condition: conditionPayload,
-        });
-        showToast("Distribusi perlengkapan baru berhasil disimpan ke Supabase!");
-      }
-      await loadDistributions();
-      setIsModalOpen(false);
+      await createEquipmentAssignment({
+        pilgrim_name: formJamaah.trim(),
+        item_name: formItem.trim(),
+        quantity: formQty,
+        condition: "good",
+        size: null,
+        is_delivered: formStatus === "Sudah Diserahkan",
+        delivered_at: null,
+        notes: null,
+      });
+      setIsAddModalOpen(false);
+      setFormJamaah("");
+      await loadData();
+      showToast("Perlengkapan berhasil disimpan ke Supabase!");
     } catch (err: unknown) {
-      console.error("Gagal menyimpan perlengkapan:", err);
-      showToast("Gagal menyimpan perubahan ke database Supabase.");
+      console.error("Gagal menambah perlengkapan:", err);
+      showToast(`Gagal menyimpan perlengkapan: ${(err as Error).message}`);
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Hapus catatan perlengkapan untuk "${name}"?`)) {
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editItem) return;
+
+    try {
+      await updateEquipmentAssignment(editItem.id, {
+        pilgrim_name: editItem.jamaah.trim() || null,
+        item_name: editItem.item,
+        quantity: editItem.qty,
+        size: editItem.ukuran?.trim() || null,
+        is_delivered: editItem.status === "Sudah Diserahkan",
+        notes: editItem.notes?.trim() || null,
+      });
+      setEditItem(null);
+      await loadData();
+      showToast("Perubahan perlengkapan berhasil disimpan ke Supabase!");
+    } catch (err: unknown) {
+      console.error("Gagal memperbarui perlengkapan:", err);
+      showToast(`Gagal menyimpan perubahan: ${(err as Error).message}`);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (confirm("Hapus catatan perlengkapan ini?")) {
       try {
-        await deleteEquipment(id);
-        await loadDistributions();
-        showToast("Catatan perlengkapan berhasil dihapus dari Supabase.");
+        await deleteEquipmentAssignment(id);
+        await loadData();
+        showToast("Perlengkapan berhasil dihapus dari Supabase.");
       } catch (err: unknown) {
         console.error("Gagal menghapus perlengkapan:", err);
-        showToast("Gagal menghapus data dari Supabase.");
+        showToast(`Gagal menghapus perlengkapan: ${(err as Error).message}`);
       }
     }
   };
 
-  const filteredDistributions = distributions.filter((item) => {
-    const q = appliedSearch.toLowerCase().trim();
-    const matchSearch =
-      !q ||
-      item.pilgrimName.toLowerCase().includes(q) ||
-      item.bookingCode.toLowerCase().includes(q) ||
-      item.packageName.toLowerCase().includes(q);
-
-    if (!matchSearch) return false;
-    if (statusFilter === "Lengkap") return item.status === "Lengkap";
-    if (statusFilter === "Sebagian") return item.status === "Sebagian";
-    return true;
-  });
-
   return (
-    <div className="space-y-6 pb-12">
-      {/* Toast */}
-      {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-800 text-white px-4 py-3 text-xs font-medium shadow-lg animate-fade-in">
-          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      {/* Header section (Screenshot 5) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <Package className="h-5 w-5 stroke-[2.2]" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Perlengkapan Jamaah
-            </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Manajemen dan rekam distribusi koper, tas paspor, kain ihram, dan seragam batik jamaah.
-            </p>
-          </div>
+    <div className="p-6 md:p-8 space-y-6">
+      {/* Header section */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+            <span>Beranda</span>
+            <span>&gt;</span>
+            <span className="text-gray-900 font-medium">Perlengkapan</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900">Perlengkapan</h1>
+          <p className="text-sm text-gray-500">Distribusi perlengkapan jamaah</p>
         </div>
 
-        <Link
-          href="/equipment/create"
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Tambah Perlengkapan</span>
-        </Link>
-      </div>
-
-      {/* Filter / Search Bar (Screenshot 5) */}
-      <div className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") setAppliedSearch(searchQuery);
-            }}
-            placeholder="Cari item perlengkapan, nama jamaah, kode booking..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 rounded-lg border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="appearance-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 pr-8 focus:outline-none"
-            >
-              <option>Semua Status</option>
-              <option>Lengkap</option>
-              <option>Sebagian</option>
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
-
-          <button
-            onClick={() => setAppliedSearch(searchQuery)}
-            className="rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 text-xs font-semibold transition cursor-pointer"
-          >
-            Cari
-          </button>
-        </div>
-      </div>
-
-      {/* If No Distributions, Show EXACT Empty State from Screenshot 5 */}
-      {filteredDistributions.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-12 text-center shadow-xs flex flex-col items-center justify-center min-h-[320px]">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-300 mb-3">
-            <Luggage className="h-8 w-8 stroke-[1.5]" />
-          </div>
-          <h3 className="font-bold text-slate-800 text-sm">
-            Belum ada data perlengkapan
-          </h3>
-          <p className="text-xs text-slate-400 max-w-sm mt-1">
-            Catat distribusi koper, tas paspor, seragam, dan kain ihram untuk setiap jamaah.
-          </p>
+        {/* Primary Button */}
+        <div>
           <Link
-            href="/equipment/create"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-4 py-2 text-xs mt-5 shadow-xs transition active:scale-95 cursor-pointer"
+            href="/perlengkapan/tambah"
+            className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm px-4 py-2 rounded-lg transition shadow-sm cursor-pointer"
           >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Catat Distribusi Baru</span>
+            <Plus className="h-4 w-4" />
+            <span>Tambah Perlengkapan</span>
           </Link>
         </div>
-      ) : (
-        /* If Distributions exist, Show Table */
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-400 font-semibold tracking-wider uppercase text-[10px]">
-                  <th className="pb-3.5 font-bold">NAMA JAMAAH &amp; BOOKING</th>
-                  <th className="pb-3.5 font-bold">PAKET PERJALANAN</th>
-                  <th className="pb-3.5 font-bold">ITEM PERLENGKAPAN DITERIMA</th>
-                  <th className="pb-3.5 font-bold">METODE PENGAMBILAN</th>
-                  <th className="pb-3.5 font-bold">STATUS</th>
-                  <th className="pb-3.5 font-bold text-center">AKSI</th>
+      </div>
+
+      {/* Tabel */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  JAMAAH
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  ITEM
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  UKURAN
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  QTY
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  STATUS
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  DISERAHKAN
+                </th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  AKSI
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {totalResults === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-400">
+                    Belum ada data perlengkapan tersimpan di Supabase.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {filteredDistributions.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                    <td className="py-3.5 pr-4 whitespace-nowrap">
-                      <p className="font-semibold text-slate-900">{item.pilgrimName}</p>
-                      <span className="font-mono text-[10px] text-slate-400">
-                        {item.bookingCode}
+              )}
+              {paginatedItems.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition border-b border-gray-100">
+                  {/* Jamaah */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                    {item.jamaah}
+                  </td>
+
+                  {/* Item */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.item}
+                  </td>
+
+                  {/* Ukuran */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.ukuran || "-"}
+                  </td>
+
+                  {/* Qty */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-normal">
+                    {item.qty}
+                  </td>
+
+                  {/* Status */}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {item.status === "Sudah Diserahkan" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        Sudah Diserahkan
                       </span>
-                    </td>
+                    )}
+                    {item.status === "Belum Diserahkan" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        Belum Diserahkan
+                      </span>
+                    )}
+                  </td>
 
-                    <td className="py-3.5 pr-4 whitespace-nowrap">
-                      <p className="text-slate-800">{item.packageName}</p>
-                    </td>
+                  {/* Diserahkan */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    {formatTanggal(item.diserahkan)}
+                  </td>
 
-                    <td className="py-3.5 pr-4 max-w-xs">
-                      <div className="flex flex-wrap gap-1">
-                        {item.items.map((it, idx) => (
-                          <span
-                            key={idx}
-                            className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 font-medium"
-                          >
-                            {it}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
+                  {/* Aksi */}
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <div className="inline-flex items-center gap-3">
+                      <button
+                        onClick={() => setEditItem(item)}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition cursor-pointer"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium transition cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-                    <td className="py-3.5 pr-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 text-slate-800">
-                        {item.method === "Dikirim Ekspedisi" ? (
-                          <Truck className="h-3.5 w-3.5 text-sky-600" />
-                        ) : (
-                          <Luggage className="h-3.5 w-3.5 text-emerald-600" />
-                        )}
-                        <span>{item.method}</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {item.distributedDate} {item.courierReceipt && `• Resi: ${item.courierReceipt}`}
-                      </p>
-                    </td>
-
-                    <td className="py-3.5 pr-4 whitespace-nowrap">
-                      {item.status === "Lengkap" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200/50">
-                          <CheckCircle2 className="h-3 w-3" />
-                          <span>Lengkap</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 border border-amber-200/50">
-                          Sebagian
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="py-3.5 text-center whitespace-nowrap">
-                      <div className="inline-flex items-center gap-2 text-slate-400">
-                        <button
-                          onClick={() => handleDelete(item.id, item.pilgrimName)}
-                          className="p-1 hover:text-red-600 transition"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Pagination footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 border-t border-gray-100 gap-3 text-xs text-gray-500">
+          <span>
+            Showing {Math.min(startIndex + 1, totalResults)} to{" "}
+            {Math.min(startIndex + itemsPerPage, totalResults)} of {totalResults} results
+          </span>
+          <div className="inline-flex items-center gap-1">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={activePage === 1}
+              className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 transition"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((num) => (
+              <button
+                key={num}
+                onClick={() => setCurrentPage(num)}
+                className={`min-w-[28px] h-7 px-2 rounded-lg font-medium transition ${
+                  activePage === num
+                    ? "bg-gray-900 text-white"
+                    : "border border-gray-200 hover:bg-gray-50 text-gray-700"
+                }`}
+              >
+                {num}
+              </button>
+            ))}
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={activePage === totalPages}
+              className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 transition"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Modal Tambah/Edit Perlengkapan */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-            <div className="flex items-start justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                  <Luggage className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Catat Distribusi Perlengkapan
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Rekam penyerahan koper, tas paspor, dan seragam batik
-                  </p>
-                </div>
-              </div>
+      {/* Modal Tambah Perlengkapan */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Tambah Perlengkapan</h3>
               <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
-
-            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
+            <form onSubmit={handleAddItem} className="p-6 space-y-4 text-sm">
               <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  NAMA JAMAAH <span className="text-red-500">*</span>
+                <label className="block font-medium text-gray-700 mb-1">
+                  Nama Jamaah <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  value={formPilgrimName}
-                  onChange={(e) => setFormPilgrimName(e.target.value)}
-                  placeholder="Contoh: Ahmad Fauzi atau Yushan Hakim"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/40 p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Contoh: Indra Kusuma"
+                  value={formJamaah}
+                  onChange={(e) => setFormJamaah(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                 />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Item Perlengkapan</label>
+                <select
+                  value={formItem}
+                  onChange={(e) => setFormItem(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="Koper">Koper</option>
+                  <option value="Seragam">Seragam</option>
+                  <option value="Kain Ihram">Kain Ihram</option>
+                  <option value="Mukena">Mukena</option>
+                  <option value="Tas Paspor">Tas Paspor</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                    KODE REGISTRASI
-                  </label>
+                  <label className="block font-medium text-gray-700 mb-1">Jumlah (Qty)</label>
                   <input
-                    type="text"
-                    value={formBookingCode}
-                    onChange={(e) => setFormBookingCode(e.target.value)}
-                    placeholder="REG-202611-002"
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                    TANGGAL PENYERAHAN
-                  </label>
-                  <input
-                    type="text"
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    placeholder="10 Okt 2026"
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    type="number"
+                    min={1}
+                    value={formQty}
+                    onChange={(e) => setFormQty(Number(e.target.value) || 1)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1.5 uppercase text-[10px] tracking-wider">
-                  ITEM PERLENGKAPAN YANG DISERAHKAN
-                </label>
-                <div className="space-y-1.5 bg-slate-50/70 p-3 rounded-xl border border-slate-200/70">
-                  {allAvailableItems.map((item, idx) => (
-                    <label key={idx} className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={selectedItems.includes(item)}
-                        onChange={() => handleToggleItem(item)}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span className="text-xs text-slate-700">{item}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                  METODE PENGAMBILAN
-                </label>
+                <label className="block font-medium text-gray-700 mb-1">Status Distribusi</label>
                 <select
-                  value={formMethod}
-                  onChange={(e) => setFormMethod(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  value={formStatus}
+                  onChange={(e) =>
+                    setFormStatus(e.target.value as "Sudah Diserahkan" | "Belum Diserahkan")
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                 >
-                  <option value="Diambil di Kantor">Diambil di Kantor</option>
-                  <option value="Dikirim Ekspedisi">Dikirim Ekspedisi (JNE / J&amp;T)</option>
+                  <option value="Belum Diserahkan">Belum Diserahkan</option>
+                  <option value="Sudah Diserahkan">Sudah Diserahkan</option>
                 </select>
               </div>
 
-              {formMethod === "Dikirim Ekspedisi" && (
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1 uppercase text-[10px] tracking-wider">
-                    NOMOR RESI PENGIRIMAN
-                  </label>
-                  <input
-                    type="text"
-                    value={formCourierReceipt}
-                    onChange={(e) => setFormCourierReceipt(e.target.value)}
-                    placeholder="Contoh: JNE-098234872"
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-              )}
-
-              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-semibold transition cursor-pointer"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-semibold shadow-xs transition active:scale-95 cursor-pointer"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
                 >
-                  Simpan Catatan
+                  Simpan Item
                 </button>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Modal Edit Perlengkapan */}
+      {editItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Edit Perlengkapan</h3>
+              <button
+                onClick={() => setEditItem(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Nama Jamaah</label>
+                <input
+                  type="text"
+                  value={editItem.jamaah}
+                  onChange={(e) => setEditItem({ ...editItem, jamaah: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Item</label>
+                <input
+                  type="text"
+                  value={editItem.item}
+                  onChange={(e) => setEditItem({ ...editItem, item: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Jumlah</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editItem.qty}
+                    onChange={(e) =>
+                      setEditItem({ ...editItem, qty: Number(e.target.value) || 1 })
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={editItem.status}
+                  onChange={(e) => {
+                    const st = e.target.value as "Sudah Diserahkan" | "Belum Diserahkan";
+                    setEditItem({ ...editItem, status: st, isDelivered: st === "Sudah Diserahkan" });
+                  }}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="Belum Diserahkan">Belum Diserahkan</option>
+                  <option value="Sudah Diserahkan">Sudah Diserahkan</option>
+                </select>
+              </div>
+
+              <p className="text-xs text-gray-400">
+                Status &quot;Sudah Diserahkan&quot; menyimpan flag pengiriman dan tanggal
+                penyerahan pada record perlengkapan jamaah.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditItem(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notifikasi */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[70] max-w-sm rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg">
+          {toastMessage}
         </div>
       )}
     </div>

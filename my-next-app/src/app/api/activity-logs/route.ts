@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logActivity, getClientIp, memoryLogsBuffer } from "@/lib/utils/activity-logger";
+import { requireSession, requireStaffSession, unauthorizedResponse } from "@/lib/api/session";
 
 export async function GET(req: NextRequest) {
+  // Daftar log aktivitas berisi data pribadi jamaah: hanya staf yang boleh membaca.
+  if (!(await requireStaffSession(req))) return unauthorizedResponse();
   try {
     const supabase = createAdminClient();
     const { searchParams } = new URL(req.url);
@@ -95,6 +98,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireSession(req))) return unauthorizedResponse();
   try {
     const body = await req.json();
     const { userId, action, description, metadata } = body;

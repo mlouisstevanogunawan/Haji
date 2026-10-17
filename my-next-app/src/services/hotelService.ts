@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type HotelRow = Database["public"]["Tables"]["hotels"]["Row"];
@@ -44,46 +45,13 @@ export async function getHotelById(id: string): Promise<HotelRow | null> {
 }
 
 export async function createHotel(payload: HotelInsert): Promise<HotelRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("hotels")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error inserting hotel:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<HotelRow>("hotels", { ...payload });
 }
 
 export async function updateHotel(id: string, payload: HotelUpdate): Promise<HotelRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("hotels")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating hotel:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<HotelRow>("hotels", id, { ...payload });
 }
 
 export async function deleteHotel(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("hotels").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting hotel:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("hotels", id);
 }

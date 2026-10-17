@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { buildSessionUser, type SessionUser } from "@/lib/auth/user";
 
 type CookieToSet = {
   name: string;
@@ -7,7 +8,23 @@ type CookieToSet = {
   options?: CookieOptions;
 };
 
-export async function updateSession(request: NextRequest) {
+export interface SupabaseSessionResult {
+  supabaseResponse: NextResponse;
+  /** Identitas dari token valid + baris profiles, atau null bila belum login. */
+  session: SessionUser | null;
+  isAuthenticated: boolean;
+}
+
+/**
+ * Sinkronisasi token Supabase Auth dari cookie request.
+ *
+ * `auth.getUser()` memvalidasi access token ke server Supabase, jadi hasilnya
+ * tidak bisa dipalsukan dengan menulis cookie manual seperti pada login demo
+ * sebelumnya.
+ */
+export async function updateSession(
+  request: NextRequest
+): Promise<SupabaseSessionResult> {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -35,16 +52,14 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Fetch current authenticated user
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Also support demo cookie session if logged in via demo account selector
-  const hasDemoSession =
-    request.cookies.get("umroh_admin_session")?.value === "authenticated";
+  if (!user) {
+    return { supabaseResponse, session: null, isAuthenticated: false };
+  }
 
-  const isAuthenticated = Boolean(user || hasDemoSession);
-
-  return { supabaseResponse, user, isAuthenticated };
+  const session = await buildSessionUser(supabase, user);
+  return { supabaseResponse, session, isAuthenticated: true };
 }

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { dbInsert, dbUpdate, dbDelete } from "@/lib/db/write";
 import { Database } from "@/types/supabase.types";
 
 export type PackageRow = Database["public"]["Tables"]["packages"]["Row"];
@@ -44,46 +45,13 @@ export async function getPackageById(id: string): Promise<PackageRow | null> {
 }
 
 export async function createPackage(payload: PackageInsert): Promise<PackageRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("packages")
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating package:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbInsert<PackageRow>("packages", { ...payload });
 }
 
 export async function updatePackage(id: string, payload: PackageUpdate): Promise<PackageRow> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("packages")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error updating package:", error.message);
-    throw new Error(error.message);
-  }
-
-  return data;
+  return dbUpdate<PackageRow>("packages", id, { ...payload });
 }
 
 export async function deletePackage(id: string): Promise<boolean> {
-  const supabase = createClient();
-  const { error } = await supabase.from("packages").delete().eq("id", id);
-
-  if (error) {
-    console.error("Error deleting package:", error.message);
-    throw new Error(error.message);
-  }
-
-  return true;
+  return dbDelete("packages", id);
 }
