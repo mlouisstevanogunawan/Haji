@@ -115,3 +115,24 @@ export interface PaymentChannelOption {
   iconName?: string;
   midtransKey?: string;
 }
+
+/**
+ * Bentuk respons "Get transaction status" (GET /v2/{order_id}/status dan
+ * GET /snap/v1/transactions/{order_id}/status). Same fields as the async
+ * notification, minus signature_key, because the answer is authenticated by our
+ * server key over TLS instead of by a per-transaction signature.
+ */
+export interface MidtransTransactionStatus {
+  order_id: string;
+  transaction_id: string | null;
+  status_code: string;
+  gross_amount: string;
+  currency: string;
+  payment_type: string;
+  transaction_status: string;
+  fraud_status?: "accept" | "deny" | "challenge" | null;
+  settlement_time?: string | null;
+  transaction_time?: string | null;
+  status_message?: string | null;
+  merchant_id?: string | null;
+}

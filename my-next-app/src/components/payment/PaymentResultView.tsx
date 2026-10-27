@@ -43,9 +43,11 @@ const config: Record<
 export function PaymentResultView({
   kind,
   orderId,
+  transactionId,
 }: {
   kind: PaymentResultKind;
   orderId?: string;
+  transactionId?: string;
 }) {
   const c = config[kind];
   return (
@@ -83,7 +85,7 @@ export function PaymentResultView({
           </Link>
         </div>
 
-        {orderId && <PaymentStatusPanel orderId={orderId} />}
+        {orderId && <PaymentStatusPanel orderId={orderId} transactionId={transactionId} />}
       </div>
     </div>
   );

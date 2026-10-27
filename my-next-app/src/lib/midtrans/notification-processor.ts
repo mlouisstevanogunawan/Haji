@@ -1,15 +1,10 @@
 import { getMidtransConfig, verifyMidtransNotificationSignature } from "@/lib/midtrans/server";
-import type { MidtransNotificationPayload } from "@/lib/midtrans/types";
-import type { InvoiceStatus } from "@/lib/midtrans/types";
+import type {
+  MidtransNotificationPayload,
+  MidtransTransactionStatus,
+  InvoiceStatus,
+} from "@/lib/midtrans/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-type InvoiceRow = {
-  id: string;
-  invoice_number: string;
-  amount: number;
-  paid_amount: number | null;
-  status: InvoiceStatus;
-};
 
 export type NotificationResult = {
   httpStatus: number;
@@ -56,16 +51,12 @@ export function invoiceNumberFromOrderId(orderId: string): string {
 }
 
 /**
- * Proses satu notifikasi Midtrans (server-to-server).
+ * Proses satu notifikasi webhook Midtrans: validasi payload lalu verifikasi
+ * signature SHA-512, baru diteruskan ke applyMidtransStatus.
  *
  * Dipakai oleh dua route (/api/midtrans/webhook dan /api/midtrans/notification)
  * supaya URL yang didaftarkan di dashboard Midtrans tidak harus sama persis
  * dengan nama file route-nya.
- *
- * Urutan tulis sengaja: insert jejak pembayaran lebih dulu sebagai gerbang
- * idempoten, baru akumulasi paid_amount. Kalau update gagal, baris yang tadi
- * kita insert dihapus lagi supaya notifikasi ulang dari Midtrans bisa memproses
- * ulang dari awal tanpa menghitung pembayaran dua kali.
  */
 export async function processMidtransNotification(
   payload: Partial<MidtransNotificationPayload>,
@@ -85,16 +76,7 @@ export async function processMidtransNotification(
     };
   }
 
-  const {
-    order_id,
-    status_code,
-    gross_amount,
-    signature_key,
-    transaction_status,
-    fraud_status,
-    payment_type,
-    transaction_id,
-  } = payload as MidtransNotificationPayload;
+  const { order_id, status_code, gross_amount, signature_key } = payload as MidtransNotificationPayload;
 
   const { serverKey } = getMidtransConfig();
   const isDummyKey = !serverKey || serverKey.includes("dummy") || serverKey.includes("xxxxx");
@@ -113,6 +95,36 @@ export async function processMidtransNotification(
     warn(`Signature tidak cocok untuk order ${order_id} — kemungkinan bukan dari Midtrans.`);
     return { httpStatus: 403, body: { error: "Invalid signature" } };
   }
+
+  return applyMidtransStatus(payload as MidtransNotificationPayload, logTag);
+}
+
+/**
+ * Terapkan satu status transaksi Midtrans ke database.
+ *
+ * Dipanggil dari dua sumber yang sama-sama dipercaya:
+ * 1. notifikasi webhook, setelah signature SHA-512 diverifikasi;
+ * 2. Status API v2 yang kita tanyakan sendiri ke Midtrans dengan Basic auth
+ *    memakai MIDTRANS_SERVER_KEY.
+ *
+ * Yang kedua tetap trusted karena jawabannya datang dari Midtrans lewat koneksi
+ * server-to-server — bukan dari query string redirect yang bisa diketik manual
+ * siapa pun di address bar.
+ *
+ * Urutan tulis sengaja: insert jejak pembayaran lebih dulu sebagai gerbang
+ * idempoten, baru akumulasi paid_amount. Kalau update gagal, baris yang tadi
+ * kita insert dihapus lagi supaya permintaan berikutnya memproses dari awal
+ * tanpa menghitung pembayaran dua kali.
+ */
+export async function applyMidtransStatus(
+  payload: MidtransTransactionStatus,
+  logTag: string
+): Promise<NotificationResult> {
+  const log = (message: string, ...args: unknown[]) => console.log(`[${logTag}] ${message}`, ...args);
+  const warn = (message: string, ...args: unknown[]) => console.warn(`[${logTag}] ${message}`, ...args);
+
+  const { order_id, gross_amount, transaction_status, fraud_status, payment_type, transaction_id } =
+    payload;
 
   const settled = isSettled(transaction_status, fraud_status);
   const nominalDibayar = Math.max(0, Math.round(Number(gross_amount) || 0));
@@ -182,6 +194,43 @@ export async function processMidtransNotification(
           order_id,
           invoice_status: invoice?.status ?? "unpaid",
           message: "Pembayaran sudah tercatat, tidak ada perubahan.",
+        },
+      };
+    }
+  }
+
+  // Status belum selesai (pending/expire/cancel) jangan ditulis ulang setiap kali
+  // halaman sukses memancing Status API — kalau tidak, satu transaksi pending
+  // meninggalkan puluhan baris sampah di tabel payments.
+  if (!settled) {
+    const { data: priorRows, error: priorError } = await supabase
+      .from("payments")
+      .select("id, transaction_status, fraud_status")
+      .eq("order_id", order_id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (priorError) {
+      warn(`Cek jejak status gagal: ${priorError.message}`);
+      return { httpStatus: 500, body: { error: "Gagal cek jejak pembayaran" } };
+    }
+
+    const unchanged = (priorRows ?? []).find(
+      (row) =>
+        row.transaction_status === transaction_status &&
+        (row.fraud_status ?? "") === (fraud_status ?? "")
+    );
+
+    if (unchanged) {
+      log(`Order ${order_id} sudah tercatat sebagai ${transaction_status} — tidak menulis ulang.`);
+      return {
+        httpStatus: 200,
+        body: {
+          status: "unchanged",
+          order_id,
+          transaction_status,
+          invoice_status: invoice?.status ?? "unpaid",
+          message: "Status sama dengan yang terakhir dicatat.",
         },
       };
     }
