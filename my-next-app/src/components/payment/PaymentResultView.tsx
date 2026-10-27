@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CheckCircle2, XCircle, Clock } from "lucide-react";
+import { PaymentStatusPanel } from "./PaymentStatusPanel";
 
 export type PaymentResultKind = "success" | "error" | "pending";
 
@@ -39,7 +40,13 @@ const config: Record<
   },
 };
 
-export function PaymentResultView({ kind }: { kind: PaymentResultKind }) {
+export function PaymentResultView({
+  kind,
+  orderId,
+}: {
+  kind: PaymentResultKind;
+  orderId?: string;
+}) {
   const c = config[kind];
   return (
     <div className="min-h-screen w-full bg-[#f8faf9] flex items-center justify-center p-6">
@@ -75,6 +82,8 @@ export function PaymentResultView({ kind }: { kind: PaymentResultKind }) {
             Buka Dashboard
           </Link>
         </div>
+
+        {orderId && <PaymentStatusPanel orderId={orderId} />}
       </div>
     </div>
   );

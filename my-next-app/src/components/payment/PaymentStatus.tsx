@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Receipt, ArrowRight } from "lucide-react";
+import { CheckCircle2, Receipt, ArrowRight, Clock3, HelpCircle } from "lucide-react";
+
+export type GatewayState = "verified" | "pending" | "unverified";
 
 export interface PaymentStatusProps {
   invoiceNumber: string;
@@ -10,7 +12,40 @@ export interface PaymentStatusProps {
   orderId?: string;
   onClose: () => void;
   onViewReceipt?: () => void;
+  /**
+   * "verified" hanya dipakai kalau Midtrans sendiri yang melaporkan transaksinya
+   * selesai. "unverified" = token tidak didapat / snap.js tidak dimuat, dan
+   * pembayaran TIDAK ditulis ke database.
+   */
+  gatewayState?: GatewayState;
 }
+
+const GATEWAY_COPY: Record<
+  GatewayState,
+  { icon: React.ReactNode; badge: string; title: string; note: string; total: string }
+> = {
+  verified: {
+    icon: <CheckCircle2 className="h-10 w-10 text-emerald-600 stroke-[2.2]" />,
+    badge: "Transaksi Terverifikasi (Lunas)",
+    title: "Pembayaran Berhasil!",
+    note: "Dana telah berhasil kami terima via Midtrans Gateway dan status tagihan telah diperbarui.",
+    total: "Total Lunas:",
+  },
+  pending: {
+    icon: <Clock3 className="h-10 w-10 text-amber-600 stroke-[2.2]" />,
+    badge: "Menunggu Konfirmasi Gateway",
+    title: "Pembayaran Tertunda",
+    note: "Transaksi masih diproses channel pembayaran. Tagihan baru diperbarui setelah Midtrans mengirim konfirmasi.",
+    total: "Nominal transaksi:",
+  },
+  unverified: {
+    icon: <HelpCircle className="h-10 w-10 text-amber-600 stroke-[2.2]" />,
+    badge: "Tidak Terverifikasi",
+    title: "Pembayaran Belum Selesai",
+    note: "Token Midtrans tidak dapat dipakai (gateway/dev mode belum aktif). Tidak ada pembayaran yang dicatat ke database.",
+    total: "Nominal tagihan:",
+  },
+};
 
 export const PaymentStatus: React.FC<PaymentStatusProps> = ({
   invoiceNumber,
@@ -19,23 +54,21 @@ export const PaymentStatus: React.FC<PaymentStatusProps> = ({
   orderId,
   onClose,
   onViewReceipt,
+  gatewayState = "verified",
 }) => {
+  const c = GATEWAY_COPY[gatewayState];
   return (
     <div className="p-6 text-center space-y-5 animate-fade-in">
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 shadow-xs border border-emerald-100">
-        <CheckCircle2 className="h-10 w-10 text-emerald-600 stroke-[2.2]" />
+        {c.icon}
       </div>
 
       <div>
         <span className="inline-flex items-center rounded-full bg-emerald-100/80 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
-          Transaksi Terverifikasi (Lunas)
+          {c.badge}
         </span>
-        <h3 className="text-lg font-bold text-slate-900 mt-2">
-          Pembayaran Berhasil!
-        </h3>
-        <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-          Dana telah berhasil kami terima via Midtrans Gateway dan status tagihan telah diperbarui.
-        </p>
+        <h3 className="text-lg font-bold text-slate-900 mt-2">{c.title}</h3>
+        <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">{c.note}</p>
       </div>
 
       <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-4 space-y-2 text-xs font-mono text-left">
@@ -54,7 +87,7 @@ export const PaymentStatus: React.FC<PaymentStatusProps> = ({
           <span className="text-slate-700 font-medium font-sans">{paymentMethod}</span>
         </div>
         <div className="flex justify-between pt-1 border-t border-slate-200/60">
-          <span className="text-slate-500 font-sans font-bold">Total Lunas:</span>
+          <span className="text-slate-500 font-sans font-bold">{c.total}</span>
           <span className="text-emerald-700 font-extrabold text-sm font-sans">
             Rp {amount.toLocaleString("id-ID")}
           </span>

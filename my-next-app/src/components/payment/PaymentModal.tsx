@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { InvoiceDetail } from "./InvoiceDetail";
 import { PaymentMethods, SelectedChannelId } from "./PaymentMethods";
-import { PaymentStatus } from "./PaymentStatus";
+import { PaymentStatus, type GatewayState } from "./PaymentStatus";
 import { formatCurrency } from "@/lib/utils";
 import { getMidtransAmount, IS_PRODUCTION } from "@/lib/midtrans/config";
 
@@ -54,6 +54,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [isSuccess, setIsSuccess] = React.useState<boolean>(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [lastOrderId, setLastOrderId] = React.useState<string>("");
+  const [finalState, setFinalState] = React.useState<GatewayState>("verified");
 
   // Reset state when modal opens
   React.useEffect(() => {
@@ -62,6 +63,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       setIsLoading(false);
       setIsSuccess(false);
       setErrorMessage(null);
+      setFinalState("verified");
     }
   }, [isOpen, invoice]);
 
@@ -80,6 +82,26 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   // Amount actually charged & persisted (capped to a safe test value in sandbox).
   const chargeAmount = getMidtransAmount(invoice.amount);
+
+  /**
+   * Hanya "verified" (Midtrans yang melaporkan transaksinya selesai) yang boleh
+   * menulis pembayaran ke database. "unverified" = token tidak didapat, snap.js
+   * belum dimuat, atau jaringan error — uang belum tentu pindah, jadi dicatat
+   * sebagai pembayaran akan memalsukan laporan.
+   */
+  const finish = (state: GatewayState, orderId: string) => {
+    setIsLoading(false);
+    setIsSuccess(true);
+    setFinalState(state);
+    if (state === "verified" && onPaymentSuccess) {
+      onPaymentSuccess(
+        invoice.invoiceNumber,
+        chargeAmount,
+        channelNameMap[selectedChannel],
+        orderId
+      );
+    }
+  };
 
   const handlePayClick = async () => {
     setIsLoading(true);
@@ -119,15 +141,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       const data = await response.json();
 
       if (!response.ok || !data.token) {
-        // Fallback simulation jika server dev tanpa Midtrans Server Key aktif
-        console.warn("Midtrans token tidak didapatkan, beralih ke simulasi pembayaran instan.");
-        setTimeout(() => {
-          setIsLoading(false);
-          setIsSuccess(true);
-          if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-          }
-        }, 1200);
+        // Gateway tidak memberi token (dev tanpa MIDTRANS_SERVER_KEY, atau API
+        // gagal). Tampilkan status tapi jangan catat pembayaran.
+        console.warn(
+          "[Midtrans] Token tidak didapat — alur ditampilkan sebagai SIMULASI, pembayaran tidak dicatat.",
+          data?.error
+        );
+        setTimeout(() => finish("unverified", uniqueOrderId), 1200);
         return;
       }
 
@@ -138,19 +158,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         (window as any).snap.pay(snapToken, {
           onSuccess: function (result: any) {
             console.log("[Midtrans Snap] Success:", result);
-            setIsLoading(false);
-            setIsSuccess(true);
-            if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-            }
+            finish("verified", uniqueOrderId);
           },
           onPending: function (result: any) {
             console.log("[Midtrans Snap] Pending:", result);
-            setIsLoading(false);
-            setIsSuccess(true);
-            if (onPaymentSuccess) {
-              onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-            }
+            // Dana belum pindah (VA/QRIS menunggu). Webhook yang akan menulis
+            // tagihannya saat transaksi benar-benar settle.
+            finish("pending", uniqueOrderId);
           },
           onError: function (result: any) {
             console.error("[Midtrans Snap] Error:", result);
@@ -163,32 +177,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           },
         });
       } else if (data.redirect_url) {
+        // snap.js belum dimuat: user diarahkan ke halaman Midtrans di tab lain.
+        // Hasil transaksinya tidak diketahui di sini, jadi tidak ada yang ditulis.
         window.open(data.redirect_url, "_blank");
-        setIsLoading(false);
-        setIsSuccess(true);
-        if (onPaymentSuccess) {
-          onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-        }
+        console.warn(
+          "[Midtrans] snap.js belum tersedia — pembayaran hanya dibuka di tab gateway, tidak dicatat."
+        );
+        finish("unverified", uniqueOrderId);
       } else {
-        // Fallback demo simulation
-        setTimeout(() => {
-          setIsLoading(false);
-          setIsSuccess(true);
-          if (onPaymentSuccess) {
-            onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-          }
-        }, 1200);
+        console.warn("[Midtrans] Respons tanpa token maupun redirect_url.");
+        setTimeout(() => finish("unverified", uniqueOrderId), 1200);
       }
     } catch (err: any) {
-      console.warn("Error calling payment API, executing fallback success flow:", err);
-      // Fallback demo simulation
-      setTimeout(() => {
-        setIsLoading(false);
-        setIsSuccess(true);
-        if (onPaymentSuccess) {
-          onPaymentSuccess(invoice.invoiceNumber, chargeAmount, channelNameMap[selectedChannel], uniqueOrderId);
-        }
-      }, 1000);
+      console.warn("[Midtrans] Gagal memanggil API create — tidak ada pembayaran dicatat:", err);
+      setTimeout(() => finish("unverified", uniqueOrderId), 1000);
     }
   };
 
@@ -242,6 +244,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               amount={chargeAmount}
               paymentMethod={channelNameMap[selectedChannel]}
               orderId={lastOrderId}
+              gatewayState={finalState}
               onClose={onClose}
               onViewReceipt={
                 onViewReceipt

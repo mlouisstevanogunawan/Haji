@@ -9,7 +9,11 @@ import {
   Menu as MenuIcon,
   FileText,
 } from "lucide-react";
-import { getInvoices, type InvoiceWithDetails } from "@/services/invoiceService";
+import {
+  getInvoices,
+  recordInvoicePayment,
+  type InvoiceWithDetails,
+} from "@/services/invoiceService";
 import { PaymentModal, PaymentInvoiceData } from "@/components/payment/PaymentModal";
 
 interface SubTagihanItem {
@@ -36,6 +40,7 @@ export default function DetailTagihanJamaahPage() {
   const [matchedInvoices, setMatchedInvoices] = React.useState<InvoiceWithDetails[]>([]);
   const [paymentModalOpen, setPaymentModalOpen] = React.useState(false);
   const [selectedPayment, setSelectedPayment] = React.useState<PaymentInvoiceData | null>(null);
+  const [isRecording, setIsRecording] = React.useState(false);
 
   const loadData = React.useCallback(async () => {
     setIsLoading(true);
@@ -127,6 +132,35 @@ export default function DetailTagihanJamaahPage() {
     });
     setPaymentModalOpen(true);
   };
+
+  const handlePaymentSuccess = React.useCallback(
+    async (_invoiceNumber: string, paidAmount: number, channel: string, orderId: string) => {
+      const invoiceId = selectedPayment?.id;
+      if (!invoiceId) {
+        setPaymentModalOpen(false);
+        return;
+      }
+
+      setIsRecording(true);
+      try {
+        // Webhook Midtrans juga menulis pembayaran yang sama; recordInvoicePayment
+        // dan webhook saling mendeteksi lewat order_id sehingga nominal ini tidak
+        // dihitung dua kali. Menulis dari sini membuat hasil pembayaran langsung
+        // kelihatan walau notifikasi asynchronous Midtrans belum tiba.
+        await recordInvoicePayment(invoiceId, paidAmount, channel, orderId);
+        setPaymentModalOpen(false);
+        await loadData();
+      } catch (err: unknown) {
+        console.error("[pembayaran] gagal mencatat pembayaran:", err);
+        alert(
+          `Pembayaran berjalan di gateway tapi gagal dicatat ke database: ${(err as Error).message}`
+        );
+      } finally {
+        setIsRecording(false);
+      }
+    },
+    [loadData, selectedPayment?.id]
+  );
 
   if (!isLoading && notFound) {
     return (
@@ -310,12 +344,14 @@ export default function DetailTagihanJamaahPage() {
           isOpen={paymentModalOpen}
           onClose={() => setPaymentModalOpen(false)}
           invoice={selectedPayment}
-          onPaymentSuccess={() => {
-            // Tidak mengubah status di state lokal: angka pembayaran diambil ulang
-            // dari Supabase agar yang tampil benar-benar data database.
-            void loadData();
-          }}
+          onPaymentSuccess={handlePaymentSuccess}
         />
+      )}
+
+      {isRecording && (
+        <div className="fixed bottom-6 right-6 z-50 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
+          Mencatat pembayaran ke database...
+        </div>
       )}
     </div>
   );

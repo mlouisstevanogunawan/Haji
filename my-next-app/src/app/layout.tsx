@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { IS_PRODUCTION } from "@/lib/midtrans/config";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -37,12 +38,16 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const snapJsUrl = IS_PRODUCTION
+    ? "https://app.midtrans.com/snap/snap.js"
+    : "https://app.sandbox.midtrans.com/snap/snap.js";
+
   return (
     <html lang="id">
       <body className="font-sans antialiased min-h-screen bg-[#f8faf9] text-slate-800">
         <QueryProvider>{children}</QueryProvider>
         <Script
-          src="https://app.sandbox.midtrans.com/snap/snap.js"
+          src={snapJsUrl}
           data-client-key={process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || ""}
           strategy="lazyOnload"
         />
