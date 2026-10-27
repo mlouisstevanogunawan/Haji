@@ -10,6 +10,7 @@ import {
   BookingWithDetails,
   BookingStatus,
 } from "@/services/bookingService";
+import { getInvoicesForBooking, InvoiceRow } from "@/services/invoiceService";
 
 interface BillItem {
   code: string;
@@ -68,16 +69,47 @@ function formatDate(value: string | null | undefined): string {
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+const INVOICE_TYPE_LABEL: Record<string, string> = {
+  dp: "Uang Muka (DP)",
+  cicilan: "Cicilan",
+  pelunasan: "Pelunasan",
+};
+
+const INVOICE_STATUS_LABEL: Record<string, BillItem["status"]> = {
+  unpaid: "Belum Bayar",
+  partial: "Sebagian",
+  paid: "Lunas",
+  expired: "Belum Bayar",
+  cancelled: "Belum Bayar",
+};
+
 // Hanya kolom yang benar-benar dikembalikan getBookingById (bookings + profiles +
-// packages) yang diisi. Field tanpa sumber (agen, pembimbing, cabang, paspor,
-// rincian pembayaran/tagihan) dibiarkan kosong, tidak dikarang-karang.
-function mapBookingToDetail(booking: BookingWithDetails): RegistrationDetail {
+// packages) dan getInvoicesForBooking yang diisi. Field tanpa sumber (agen,
+// pembimbing, cabang) dibiarkan kosong, tidak dikarang-karang.
+function mapBookingToDetail(
+  booking: BookingWithDetails,
+  invoices: InvoiceRow[]
+): RegistrationDetail {
   const label = STATUS_TO_LABEL[booking.status] || "";
+
+  const totalBill = invoices.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+  const paid = invoices.reduce((sum, i) => sum + Number(i.paid_amount || 0), 0);
+  const remaining = Math.max(0, totalBill - paid);
+
+  const paymentStatus =
+    invoices.length === 0
+      ? "Belum Ditagih"
+      : remaining === 0
+      ? "Lunas"
+      : paid > 0
+      ? "Sebagian"
+      : "Belum Bayar";
+
   return {
     id: booking.id,
-    code: booking.invoice_number || `REG-${booking.id.slice(0, 5).toUpperCase()}`,
+    code: booking.kode_booking,
     jamaahName: booking.profiles?.full_name || "",
-    passportNumber: "",
+    passportNumber: booking.profiles?.passport_number || "",
     phone: booking.profiles?.phone || "",
     packageName: booking.packages?.name || "",
     packageType: booking.packages?.type
@@ -92,11 +124,18 @@ function mapBookingToDetail(booking: BookingWithDetails): RegistrationDetail {
     agent: "",
     guide: "",
     branch: "",
-    totalBill: formatRp(booking.total_price),
-    paidAmount: "",
-    remainingAmount: "",
-    paymentStatus: "",
-    bills: [],
+    totalBill: formatRp(totalBill),
+    paidAmount: formatRp(paid),
+    remainingAmount: formatRp(remaining),
+    paymentStatus,
+    bills: invoices.map((inv) => ({
+      code: inv.invoice_number,
+      type: INVOICE_TYPE_LABEL[inv.type] || inv.type,
+      amount: formatRp(inv.amount),
+      paid: formatRp(inv.paid_amount),
+      status: INVOICE_STATUS_LABEL[inv.status] || "Belum Bayar",
+      dueDate: formatDate(inv.due_date),
+    })),
   };
 }
 
@@ -127,12 +166,15 @@ export default function DetailPendaftaranPage() {
     setNotFound(false);
     setLoadError("");
     try {
-      const booking = await getBookingById(id);
+      const [booking, invoices] = await Promise.all([
+        getBookingById(id),
+        getInvoicesForBooking(id).catch(() => [] as InvoiceRow[]),
+      ]);
       if (!booking) {
         setNotFound(true);
         return;
       }
-      const detail = mapBookingToDetail(booking);
+      const detail = mapBookingToDetail(booking, invoices);
       setData(detail);
       setSelectedStatus(detail.status);
     } catch (err: unknown) {

@@ -43,8 +43,16 @@ export async function getInvoices(): Promise<InvoiceWithDetails[]> {
   return data || [];
 }
 
-export async function getInvoiceByNumber(invoiceNumber: string): Promise<InvoiceWithDetails | null> {
-  try {
+export async function getInvoicesForBooking(bookingId: string): Promise<InvoiceRow[]> {
+  const data = await dbRead<InvoiceRow>("invoices", {
+    select: "*",
+    eq: { booking_id: bookingId },
+    order: "due_date",
+  });
+  return data || [];
+}
+
+export async function getInvoiceByNumber(invoiceNumber: string): Promise<InvoiceWithDetails | null> {  try {
     const rows = await dbRead<InvoiceWithDetails>("invoices", {
       select: INVOICE_SELECT,
       eq: { invoice_number: invoiceNumber },

@@ -7,6 +7,33 @@ export type PackageInsert = Database["public"]["Tables"]["packages"]["Insert"];
 export type PackageUpdate = Database["public"]["Tables"]["packages"]["Update"];
 export type PackageType = Database["public"]["Enums"]["package_type"];
 
+/**
+ * Uang muka yang akan ditagihkan trigger trg_bookings_make_dp.
+ * Rumus harus tetap sama dengan di database, kalau tidak ringkasan di form
+ * menampilkan angka yang berbeda dari invoice yang benar-benar tersimpan.
+ */
+export function downPaymentFor(pkg: Pick<PackageRow, "price" | "down_payment">): number {
+  const price = Number(pkg.price || 0);
+  const fixed = Number(pkg.down_payment || 0);
+  if (fixed > 0) return Math.min(fixed, price);
+  return Math.round(price * 0.5);
+}
+
+/** Sisa kursi; null bila paket tidak membatasi kuota. */
+export function seatsLeftFor(
+  pkg: Pick<PackageRow, "quota" | "booked_count">
+): number | null {
+  const quota = Number(pkg.quota ?? 0);
+  if (!quota) return null;
+  return Math.max(0, quota - Number(pkg.booked_count ?? 0));
+}
+
+export function isBookable(pkg: PackageRow): boolean {
+  if (!pkg.is_active) return false;
+  const left = seatsLeftFor(pkg);
+  return left === null || left > 0;
+}
+
 export async function getPackages(type?: PackageType): Promise<PackageRow[]> {
   const supabase = createClient();
   let query = supabase

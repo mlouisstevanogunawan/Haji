@@ -31,6 +31,9 @@ export const WRITABLE_COLUMNS: Record<string, readonly string[]> = {
     "office_branch", "is_active", ...AUDIT,
   ],
   packages: [
+    // booked_count sengaja tidak ada di daftar: kolom itu dihitung ulang oleh
+    // trigger trg_bookings_sync_count, ditulis dari aplikasi hanya akan membuat
+    // jumlah kursi melenceng dari booking yang sebenarnya.
     "id", "name", "type", "price", "duration_days", "quota", "facilities",
     "description", "is_active", "departure_date", "departure_city", "airline",
     "facilities_excluded", "code", "down_payment", "branch_id", ...AUDIT,
@@ -55,7 +58,7 @@ export const WRITABLE_COLUMNS: Record<string, readonly string[]> = {
   bookings: [
     "id", "pilgrim_id", "package_id", "booking_date", "departure_date",
     "return_date", "status", "total_price", "agent_id", "guide_id",
-    "invoice_number", "notes", ...AUDIT,
+    "invoice_number", "kode_booking", "room_type", "notes", ...AUDIT,
   ],
   documents: [
     "id", "pilgrim_id", "document_type", "document_number", "issue_date",

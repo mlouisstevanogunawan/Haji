@@ -6,6 +6,9 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+/** Sesuai CHECK constraint bookings_room_type_check di database. */
+export type BookingRoomType = "single" | "double" | "triple" | "quad"
+
 export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.18"
@@ -197,10 +200,12 @@ export type Database = {
           guide_id: string | null
           id: string
           invoice_number: string | null
+          kode_booking: string
           notes: string | null
           package_id: string
           pilgrim_id: string
           return_date: string | null
+          room_type: BookingRoomType | null
           status: Database["public"]["Enums"]["booking_status"]
           total_price: number
           updated_at: string
@@ -213,10 +218,12 @@ export type Database = {
           guide_id?: string | null
           id?: string
           invoice_number?: string | null
+          kode_booking?: string
           notes?: string | null
           package_id: string
           pilgrim_id: string
           return_date?: string | null
+          room_type?: BookingRoomType | null
           status?: Database["public"]["Enums"]["booking_status"]
           total_price: number
           updated_at?: string
@@ -229,10 +236,12 @@ export type Database = {
           guide_id?: string | null
           id?: string
           invoice_number?: string | null
+          kode_booking?: string
           notes?: string | null
           package_id?: string
           pilgrim_id?: string
           return_date?: string | null
+          room_type?: BookingRoomType | null
           status?: Database["public"]["Enums"]["booking_status"]
           total_price?: number
           updated_at?: string
@@ -847,6 +856,7 @@ export type Database = {
       packages: {
         Row: {
           airline: string | null
+          booked_count: number
           branch_id: string | null
           code: string | null
           created_at: string
@@ -867,6 +877,8 @@ export type Database = {
         }
         Insert: {
           airline?: string | null
+          /** Diisi trigger dari jumlah booking aktif; tidak boleh ditulis klien. */
+          booked_count?: number
           branch_id?: string | null
           code?: string | null
           created_at?: string
@@ -887,6 +899,7 @@ export type Database = {
         }
         Update: {
           airline?: string | null
+          booked_count?: number
           branch_id?: string | null
           code?: string | null
           created_at?: string

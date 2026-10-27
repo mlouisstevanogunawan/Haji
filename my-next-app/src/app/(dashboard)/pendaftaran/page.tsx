@@ -20,11 +20,12 @@ import {
   deleteBooking,
   BookingWithDetails,
 } from "@/services/bookingService";
-import { getPackages, PackageRow } from "@/services/packageService";
+import { getPackages, isBookable, seatsLeftFor, PackageRow } from "@/services/packageService";
 import { getJamaahList, JamaahProfile } from "@/services/jamaahService";
 import { getGuides, GuideRow } from "@/services/guideService";
 import { getInvoices } from "@/services/invoiceService";
 import { useRole } from "@/context/RoleContext";
+import { createClient } from "@/lib/supabase/client";
 
 interface RegistrationItem {
   id: string;
@@ -77,7 +78,7 @@ function mapBookingToRegistrationItem(
 
   return {
     id: b.id,
-    code: b.invoice_number || `REG-${b.id.slice(0, 5).toUpperCase()}`,
+    code: b.kode_booking,
     jamaahName: b.profiles?.full_name || "-",
     pilgrimId: b.pilgrim_id ?? null,
     packageName: b.packages?.name || "-",
@@ -157,6 +158,32 @@ export default function PendaftaranPage() {
     loadData();
   }, [loadData]);
 
+  // Pendaftaran dan kuota berubah dari banyak jalur (form admin, portal agen,
+  // pembayaran Midtrans). Langganan ini membuat daftar ikut tanpa refresh.
+  React.useEffect(() => {
+    const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        loadData();
+      }, 400);
+    };
+
+    const channel = supabase
+      .channel("pendaftaran-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "bookings" }, scheduleReload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "packages" }, scheduleReload)
+      .subscribe();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [loadData]);
+
   const handleApplyFilter = () => {
     setAppliedStatus(statusFilter);
     setAppliedPackage(packageFilter);
@@ -200,7 +227,7 @@ export default function PendaftaranPage() {
         booking_date: bookingDate || new Date().toISOString().split("T")[0],
         departure_date: pkg.departure_date ?? null,
         total_price: Number(pkg.price) || 0,
-        status: "confirmed",
+        status: "pending",
       });
 
       setIsModalOpen(false);
@@ -495,14 +522,15 @@ export default function PendaftaranPage() {
                   required
                 >
                   <option value="">-- Pilih Paket Keberangkatan --</option>
-                  {packages.map((pkg) => (
+                  {packages.filter(isBookable).map((pkg) => (
                     <option key={pkg.id} value={pkg.id}>
-                      {pkg.name} - Rp {Number(pkg.price).toLocaleString("id-ID")}
+                      {pkg.name} - Rp {Number(pkg.price).toLocaleString("id-ID")} (sisa{" "}
+                      {seatsLeftFor(pkg) ?? "∞"} kursi)
                     </option>
                   ))}
-                  {packages.length === 0 && (
+                  {packages.filter(isBookable).length === 0 && (
                     <option value="" disabled>
-                      Belum ada paket terdaftar di database
+                      Belum ada paket dengan sisa kuota
                     </option>
                   )}
                 </select>

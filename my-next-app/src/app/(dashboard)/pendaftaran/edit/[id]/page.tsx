@@ -50,7 +50,7 @@ export default function EditPendaftaranPage() {
           showToast("error", "Pendaftaran dengan ID ini tidak ditemukan di database.");
           return;
         }
-        setCode(`REG-${booking.id.slice(0, 5).toUpperCase()}`);
+        setCode(booking.kode_booking);
         setJamaahName(booking.profiles?.full_name || "—");
         setPackageName(booking.packages?.name || "—");
         setNotes(booking.notes || "");

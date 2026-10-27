@@ -88,7 +88,7 @@ export default function DaftarkanJamaahAgenPage() {
         departure_date: pkg.departure_date || null,
         total_price: Number(pkg.price),
         notes: catatan.trim() || null,
-        status: "confirmed",
+        status: "pending",
       });
 
       setNotice({ kind: "success", text: "Pendaftaran jamaah tersimpan di database." });
